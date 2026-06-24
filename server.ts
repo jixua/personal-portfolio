@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import multer from "multer";
-import { knowledgeDocs } from "./src/data";
+import { knowledgeDocs, experiences as seedExperiences } from "./src/data";
 
 // Create /data dir if it doesn't exist
 const dataDir = path.join(process.cwd(), "data");
@@ -66,6 +66,15 @@ sqlite.exec(`
     isFolder INTEGER NOT NULL DEFAULT 0,
     content TEXT
   );
+  CREATE TABLE IF NOT EXISTS experiences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT NOT NULL,
+    role TEXT,
+    date TEXT,
+    description TEXT,
+    achievements TEXT,
+    techStack TEXT
+  );
 `);
 
 // Migrations for existing databases
@@ -122,6 +131,22 @@ function deleteDocRecursive(id: number) {
   for (const c of children) deleteDocRecursive(c.id);
   sqlite.prepare("DELETE FROM docs WHERE id = ?").run(id);
 }
+
+// 首次启动时，把 data.ts 中的静态实践历程种入 experiences 表
+function seedExperiencesData() {
+  const row = sqlite.prepare("SELECT COUNT(*) AS c FROM experiences").get() as { c: number };
+  if (row.c > 0) return;
+  const insert = sqlite.prepare(
+    "INSERT INTO experiences (company, role, date, description, achievements, techStack) VALUES (?, ?, ?, ?, ?, ?)"
+  );
+  const tx = sqlite.transaction(() => {
+    for (const e of seedExperiences) {
+      insert.run(e.company, e.role, e.date, e.description, JSON.stringify(e.achievements), JSON.stringify(e.techStack));
+    }
+  });
+  tx();
+}
+seedExperiencesData();
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key_12345";
 
@@ -284,6 +309,33 @@ async function startServer() {
 
   app.delete("/api/docs/:id", requireAuth, (req, res) => {
     deleteDocRecursive(Number(req.params.id));
+    res.json({ ok: true });
+  });
+
+  // Experiences (实践历程) API
+  app.get("/api/experiences", (req, res) => {
+    const list = sqlite.prepare("SELECT * FROM experiences ORDER BY id").all();
+    res.json(list);
+  });
+
+  app.post("/api/experiences", requireAuth, (req, res) => {
+    const { company, role, date, description, achievements, techStack } = req.body;
+    const info = sqlite.prepare(
+      "INSERT INTO experiences (company, role, date, description, achievements, techStack) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(company, role, date, description, achievements, techStack);
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.put("/api/experiences/:id", requireAuth, (req, res) => {
+    const { company, role, date, description, achievements, techStack } = req.body;
+    sqlite.prepare(
+      "UPDATE experiences SET company=?, role=?, date=?, description=?, achievements=?, techStack=? WHERE id=?"
+    ).run(company, role, date, description, achievements, techStack, req.params.id);
+    res.json({ ok: true });
+  });
+
+  app.delete("/api/experiences/:id", requireAuth, (req, res) => {
+    sqlite.prepare("DELETE FROM experiences WHERE id=?").run(req.params.id);
     res.json({ ok: true });
   });
 

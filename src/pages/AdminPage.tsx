@@ -4,11 +4,11 @@ import { Link } from "react-router-dom";
 import {
   LayoutDashboard, FileText, BookOpen, Layers,
   Plus, Edit3, Trash2, ArrowLeft, Save, UploadCloud, X, LogOut, Loader2,
-  ChevronRight, ChevronDown, Folder, FolderPlus, FilePlus
+  ChevronRight, ChevronDown, Folder, FolderPlus, FilePlus, Briefcase
 } from "lucide-react";
 import type { DocNode } from "../data";
 
-type AdminTab = "overview" | "projects" | "blog" | "docs";
+type AdminTab = "overview" | "projects" | "blog" | "docs" | "experience";
 
 interface ApiProject {
   id: number;
@@ -31,9 +31,19 @@ interface ApiPost {
   content: string | null;
 }
 
+interface ApiExperience {
+  id: number;
+  company: string;
+  role: string | null;
+  date: string | null;
+  description: string | null;
+  achievements: string | null; // JSON 数组字符串
+  techStack: string | null; // JSON 数组字符串
+}
+
 type EditingContext = {
-  type: "project" | "blog" | "doc";
-  item: ApiProject | ApiPost | DocNode | null;
+  type: "project" | "blog" | "doc" | "experience";
+  item: ApiProject | ApiPost | DocNode | ApiExperience | null;
   // 仅 doc 新建时使用
   parentId?: string | null;
   isFolder?: boolean;
@@ -63,6 +73,7 @@ export function AdminPage() {
   const [apiProjects, setApiProjects] = useState<ApiProject[]>([]);
   const [apiPosts, setApiPosts] = useState<ApiPost[]>([]);
   const [apiDocs, setApiDocs] = useState<DocNode[]>([]);
+  const [apiExperiences, setApiExperiences] = useState<ApiExperience[]>([]);
 
   // Form state for editor modal
   const [formTitle, setFormTitle] = useState("");
@@ -78,6 +89,10 @@ export function AdminPage() {
   const [formTags, setFormTags] = useState(""); // 逗号分隔
   const [formLink, setFormLink] = useState("");
   const [formGithub, setFormGithub] = useState("");
+  // 实践历程专属字段
+  const [formRole, setFormRole] = useState("");
+  const [formAchievements, setFormAchievements] = useState(""); // 每行一个
+  const [formTechStack, setFormTechStack] = useState(""); // 逗号分隔
   const [saving, setSaving] = useState(false);
 
   const [email, setEmail] = useState("");
@@ -87,14 +102,16 @@ export function AdminPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [projRes, postsRes, docsRes] = await Promise.all([
+      const [projRes, postsRes, docsRes, expRes] = await Promise.all([
         fetch("/api/projects"),
         fetch("/api/posts"),
         fetch("/api/docs"),
+        fetch("/api/experiences"),
       ]);
       if (projRes.ok) setApiProjects(await projRes.json());
       if (postsRes.ok) setApiPosts(await postsRes.json());
       if (docsRes.ok) setApiDocs(await docsRes.json());
+      if (expRes.ok) setApiExperiences(await expRes.json());
     } catch {}
   }, []);
 
@@ -130,28 +147,30 @@ export function AdminPage() {
     setFormSnippet("");
     setFormContent("");
     setFormImageUrl("");
+    setFormDate("");
+    setFormReadTime("");
     setFormLongDescription("");
     setFormFeatures("");
     setFormTags("");
     setFormLink("");
     setFormGithub("");
+    setFormRole("");
+    setFormAchievements("");
+    setFormTechStack("");
 
     if (!editingContext.item) {
-      // 新建
+      // 新建：仅博客需要默认日期/阅读时间
       if (editingContext.type === "blog") {
         setFormDate(new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" }));
         setFormReadTime("5 分钟阅读");
-      } else {
-        setFormDate("");
-        setFormReadTime("");
       }
       return;
     }
 
     const item = editingContext.item;
-    setFormTitle(item.title ?? "");
     if (editingContext.type === "project") {
       const p = item as ApiProject;
+      setFormTitle(p.title ?? "");
       setFormDescription(p.description ?? "");
       setFormLongDescription(p.longDescription ?? "");
       setFormFeatures(p.features ? safeParseArray(p.features).join("\n") : "");
@@ -161,9 +180,19 @@ export function AdminPage() {
       setFormGithub(p.github ?? "");
     } else if (editingContext.type === "doc") {
       const p = item as DocNode;
+      setFormTitle(p.title ?? "");
       setFormContent(p.content ?? "");
+    } else if (editingContext.type === "experience") {
+      const p = item as ApiExperience;
+      setFormTitle(p.company ?? "");
+      setFormRole(p.role ?? "");
+      setFormDate(p.date ?? "");
+      setFormDescription(p.description ?? "");
+      setFormAchievements(p.achievements ? safeParseArray(p.achievements).join("\n") : "");
+      setFormTechStack(p.techStack ? safeParseArray(p.techStack).join(", ") : "");
     } else {
       const p = item as ApiPost;
+      setFormTitle(p.title ?? "");
       setFormSnippet(p.snippet ?? "");
       setFormContent(p.content ?? "");
       setFormDate(p.date ?? "");
@@ -210,6 +239,22 @@ export function AdminPage() {
           };
           await fetch("/api/docs", { method: "POST", headers, body: JSON.stringify(body) });
         }
+      } else if (editingContext.type === "experience") {
+        const achievements = formAchievements.split("\n").map((s) => s.trim()).filter(Boolean);
+        const techStack = formTechStack.split(",").map((s) => s.trim()).filter(Boolean);
+        const body = {
+          company: formTitle,
+          role: formRole,
+          date: formDate,
+          description: formDescription,
+          achievements: JSON.stringify(achievements),
+          techStack: JSON.stringify(techStack),
+        };
+        if (editingContext.item) {
+          await fetch(`/api/experiences/${(editingContext.item as ApiExperience).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+        } else {
+          await fetch("/api/experiences", { method: "POST", headers, body: JSON.stringify(body) });
+        }
       } else {
         const body = { title: formTitle, snippet: formSnippet, date: formDate, readTime: formReadTime, content: formContent };
         if (editingContext.item) {
@@ -225,11 +270,11 @@ export function AdminPage() {
     }
   };
 
-  const handleDelete = async (type: "project" | "blog" | "doc", id: number | string, message = "确定要删除吗？") => {
+  const handleDelete = async (type: "project" | "blog" | "doc" | "experience", id: number | string, message = "确定要删除吗？") => {
     if (!confirm(message)) return;
     const headers = { Authorization: `Bearer ${token}` };
-    const base = type === "project" ? "projects" : type === "doc" ? "docs" : "posts";
-    await fetch(`/api/${base}/${id}`, { method: "DELETE", headers });
+    const baseMap = { project: "projects", doc: "docs", experience: "experiences", blog: "posts" } as const;
+    await fetch(`/api/${baseMap[type]}/${id}`, { method: "DELETE", headers });
     await fetchData();
   };
 
@@ -325,6 +370,7 @@ export function AdminPage() {
           <NavItem icon={<Layers className="w-5 h-5" />} label="作品集管理" isActive={activeTab === "projects"} onClick={() => setActiveTab("projects")} />
           <NavItem icon={<FileText className="w-5 h-5" />} label="博客文章" isActive={activeTab === "blog"} onClick={() => setActiveTab("blog")} />
           <NavItem icon={<BookOpen className="w-5 h-5" />} label="面经体系" isActive={activeTab === "docs"} onClick={() => setActiveTab("docs")} />
+          <NavItem icon={<Briefcase className="w-5 h-5" />} label="实践历程" isActive={activeTab === "experience"} onClick={() => setActiveTab("experience")} />
         </div>
         <div className="p-4 border-t border-gray-100 space-y-2">
           <Link to="/" className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-gray-600 hover:bg-gray-100 transition-colors">
@@ -344,6 +390,7 @@ export function AdminPage() {
               projectCount={apiProjects.length}
               postCount={apiPosts.length}
               docCount={countDocs(apiDocs)}
+              expCount={apiExperiences.length}
               onTabChange={setActiveTab}
             />
           )}
@@ -378,6 +425,14 @@ export function AdminPage() {
               }
             />
           )}
+          {activeTab === "experience" && (
+            <ExperienceManager
+              experiences={apiExperiences}
+              onNew={() => setEditingContext({ type: "experience", item: null })}
+              onEdit={(item) => setEditingContext({ type: "experience", item })}
+              onDelete={(item) => handleDelete("experience", item.id, `确定删除「${item.company}」这段经历吗？`)}
+            />
+          )}
         </div>
       </div>
 
@@ -404,11 +459,11 @@ export function AdminPage() {
                     ? editingContext.item
                       ? (editingDocIsFolder ? "重命名目录" : "编辑文档")
                       : (editingContext.isFolder ? "新建目录" : "新建文档")
-                    : editingContext.item
-                    ? "编辑内容"
                     : editingContext.type === "project"
-                    ? "新增项目"
-                    : "写新文章"}
+                    ? (editingContext.item ? "编辑项目" : "新增项目")
+                    : editingContext.type === "experience"
+                    ? (editingContext.item ? "编辑经历" : "新增经历")
+                    : (editingContext.item ? "编辑文章" : "写新文章")}
                 </h3>
                 <button onClick={() => setEditingContext(null)} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors">
                   <X className="w-5 h-5" />
@@ -417,13 +472,15 @@ export function AdminPage() {
 
               <div className="flex-1 overflow-y-auto p-6 custom-scrollbar flex flex-col gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">标题</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {editingContext.type === "experience" ? "公司 / 组织名称" : editingContext.type === "doc" && editingDocIsFolder ? "目录名称" : "标题"}
+                  </label>
                   <input
                     type="text"
                     value={formTitle}
                     onChange={(e) => setFormTitle(e.target.value)}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                    placeholder="输入标题..."
+                    placeholder={editingContext.type === "experience" ? "如：字节跳动 (ByteDance)" : "输入标题..."}
                   />
                 </div>
 
@@ -569,6 +626,61 @@ export function AdminPage() {
                       />
                     </div>
                   </>
+                ) : editingContext.type === "experience" ? (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">职位 / 角色</label>
+                        <input
+                          type="text"
+                          value={formRole}
+                          onChange={(e) => setFormRole(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          placeholder="如：后端研发工程师 (实习)"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">时间区间</label>
+                        <input
+                          type="text"
+                          value={formDate}
+                          onChange={(e) => setFormDate(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          placeholder="如：2025.07 - 2026.01"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">经历描述</label>
+                      <textarea
+                        value={formDescription}
+                        onChange={(e) => setFormDescription(e.target.value)}
+                        rows={3}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                        placeholder="对这段经历的整体描述..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">工作成果（每行一条）</label>
+                      <textarea
+                        value={formAchievements}
+                        onChange={(e) => setFormAchievements(e.target.value)}
+                        rows={4}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-y"
+                        placeholder="主导某核心链路重构，P99 降低 40%&#10;设计轻量级配置中心方案..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">技术栈（逗号分隔）</label>
+                      <input
+                        type="text"
+                        value={formTechStack}
+                        onChange={(e) => setFormTechStack(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                        placeholder="Golang, Redis, Kafka, MySQL"
+                      />
+                    </div>
+                  </>
                 ) : null}
 
                 {(editingContext.type === "blog" || (editingContext.type === "doc" && !editingDocIsFolder)) && (
@@ -615,14 +727,15 @@ function NavItem({ icon, label, isActive, onClick }: { icon: React.ReactNode; la
   );
 }
 
-function OverviewTab({ projectCount, postCount, docCount, onTabChange }: { projectCount: number; postCount: number; docCount: number; onTabChange: (tab: AdminTab) => void }) {
+function OverviewTab({ projectCount, postCount, docCount, expCount, onTabChange }: { projectCount: number; postCount: number; docCount: number; expCount: number; onTabChange: (tab: AdminTab) => void }) {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
       <h1 className="text-3xl font-bold text-gray-900 mb-8">数据总览</h1>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
         <StatCard icon={<Layers />} title="作品集" count={projectCount} onClick={() => onTabChange("projects")} color="indigo" />
         <StatCard icon={<FileText />} title="博客文章" count={postCount} onClick={() => onTabChange("blog")} color="teal" />
         <StatCard icon={<BookOpen />} title="面经文档" count={docCount} onClick={() => onTabChange("docs")} color="blue" />
+        <StatCard icon={<Briefcase />} title="实践历程" count={expCount} onClick={() => onTabChange("experience")} color="amber" />
       </div>
     </motion.div>
   );
@@ -633,6 +746,7 @@ function StatCard({ icon, title, count, onClick, color }: { icon: React.ReactNod
     indigo: "bg-indigo-50 text-indigo-600",
     teal: "bg-teal-50 text-teal-600",
     blue: "bg-blue-50 text-blue-600",
+    amber: "bg-amber-50 text-amber-600",
   };
   return (
     <div onClick={onClick} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group">
@@ -743,6 +857,68 @@ function BlogManager({
               </div>
             ))}
           </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function ExperienceManager({
+  experiences,
+  onNew,
+  onEdit,
+  onDelete,
+}: {
+  experiences: ApiExperience[];
+  onNew: () => void;
+  onEdit: (item: ApiExperience) => void;
+  onDelete: (item: ApiExperience) => void;
+}) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-3xl font-bold text-gray-900">实践历程管理</h1>
+        <button onClick={onNew} className="bg-amber-500 hover:bg-amber-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors">
+          <Plus className="w-5 h-5" /> 新增经历
+        </button>
+      </div>
+      {experiences.length === 0 ? (
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-12 text-center text-gray-400">
+          <Briefcase className="w-12 h-12 text-gray-200 mx-auto mb-4" />
+          <p>暂无经历，点击右上角新增</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {experiences.map((e) => {
+            const tech = e.techStack ? safeParseArray(e.techStack) : [];
+            return (
+              <div key={e.id} className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <h3 className="font-bold text-lg text-gray-900">{e.company}</h3>
+                    {e.role && <span className="text-sm font-medium text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-full">{e.role}</span>}
+                  </div>
+                  {e.date && <div className="text-xs font-mono text-gray-400 mt-1">{e.date}</div>}
+                  {e.description && <p className="text-gray-500 text-sm mt-2 line-clamp-2">{e.description}</p>}
+                  {tech.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      {tech.map((t) => (
+                        <span key={t} className="px-2 py-0.5 bg-gray-50 border border-gray-100 text-gray-500 text-xs font-medium rounded">{t}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => onEdit(e)} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
+                    <Edit3 className="w-5 h-5" />
+                  </button>
+                  <button onClick={() => onDelete(e)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </motion.div>

@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { experiences } from "../data";
 import { Building2, Calendar, CheckCircle2, ChevronRight } from "lucide-react";
+import { useData } from "../context/DataContext";
 
 export function Experience() {
+  const { experiences } = useData();
   const timelineData = [...experiences];
   const [activeIndex, setActiveIndex] = useState(0);
-  const activeExp = timelineData[activeIndex];
+  const activeExp = timelineData[Math.min(activeIndex, Math.max(0, timelineData.length - 1))];
+
+  if (timelineData.length === 0) return null;
 
   return (
     <section id="experience" className="py-24 px-6 relative z-10 bg-[#fafafa]">
