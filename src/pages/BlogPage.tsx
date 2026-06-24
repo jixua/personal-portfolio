@@ -3,11 +3,22 @@ import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronRight, ChevronDown, FileText, Folder, BookOpen, PenTool, ArrowLeft } from "lucide-react";
-import { knowledgeDocs, DocNode } from "../data";
+import { DocNode } from "../data";
 import { useData } from "../context/DataContext";
 
+// 递归查找第一篇文档（非文件夹）
+function findFirstDoc(nodes: DocNode[]): DocNode | undefined {
+  for (const node of nodes) {
+    if (!node.isFolder) return node;
+    if (node.children) {
+      const found = findFirstDoc(node.children);
+      if (found) return found;
+    }
+  }
+}
+
 export function BlogPage() {
-  const { posts: blogPosts } = useData();
+  const { posts: blogPosts, docs: knowledgeDocs } = useData();
   const [searchParams, setSearchParams] = useSearchParams();
   const idFromUrl = searchParams.get("id");
   const tabFromUrl = searchParams.get("tab") as "blog" | "docs" | "intro";
@@ -27,19 +38,6 @@ export function BlogPage() {
     }
   }, [activeId, activeTab, setSearchParams]);
 
-  // Set initial default selection if none provided
-  useEffect(() => {
-    if (!activeId && activeTab !== "intro") {
-      if (activeTab === "docs") {
-        const firstDoc = knowledgeDocs[0]?.children?.[0]?.children?.[0]; // Get inside java base
-        if (firstDoc) setActiveId(firstDoc.id);
-      } else if (activeTab === "blog") {
-        if (blogPosts.length > 0) setActiveId(blogPosts[0].id);
-      }
-    }
-  }, [activeId, activeTab]);
-
-  const activePost = blogPosts.find(p => p.id === activeId);
   const findDoc = (nodes: DocNode[], id: string): DocNode | undefined => {
     for (const node of nodes) {
       if (node.id === id) return node;
@@ -49,6 +47,24 @@ export function BlogPage() {
       }
     }
   };
+
+  // 设置默认选中项；当数据异步加载后当前选中项失效时，自动回退到第一篇
+  useEffect(() => {
+    if (activeTab === "intro") return;
+    if (activeTab === "docs") {
+      const exists = activeId ? findDoc(knowledgeDocs, activeId) : undefined;
+      if (!exists) {
+        const first = findFirstDoc(knowledgeDocs);
+        setActiveId(first?.id ?? null);
+      }
+    } else if (activeTab === "blog") {
+      const exists = activeId ? blogPosts.find(p => p.id === activeId) : undefined;
+      if (!exists && blogPosts.length > 0) setActiveId(blogPosts[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, activeTab, knowledgeDocs, blogPosts]);
+
+  const activePost = blogPosts.find(p => p.id === activeId);
   const activeDoc = activeTab === "docs" && activeId ? findDoc(knowledgeDocs, activeId) : null;
 
   const toggleFolder = (id: string, e: React.MouseEvent) => {
@@ -167,7 +183,7 @@ export function BlogPage() {
               transition={{ delay: 0.2 }}
               onClick={() => {
                 setActiveTab("docs");
-                const firstDoc = knowledgeDocs[0]?.children?.[0]?.children?.[0];
+                const firstDoc = findFirstDoc(knowledgeDocs);
                 setActiveId(firstDoc?.id || null);
               }}
               className="bg-white rounded-[2rem] p-8 border border-gray-100 shadow-xl shadow-gray-200/20 hover:shadow-2xl hover:shadow-teal-500/10 hover:border-teal-100 transition-all cursor-pointer group flex flex-col"
@@ -213,7 +229,7 @@ export function BlogPage() {
             <button
               onClick={() => {
                 setActiveTab("docs");
-                const firstDoc = knowledgeDocs[0]?.children?.[0]?.children?.[0];
+                const firstDoc = findFirstDoc(knowledgeDocs);
                 setActiveId(firstDoc?.id || null);
               }}
               className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-bold transition-all ${

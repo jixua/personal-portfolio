@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import multer from "multer";
+import { knowledgeDocs } from "./src/data";
 
 // Create /data dir if it doesn't exist
 const dataDir = path.join(process.cwd(), "data");
@@ -58,6 +59,13 @@ sqlite.exec(`
     readTime TEXT,
     content TEXT
   );
+  CREATE TABLE IF NOT EXISTS docs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parentId INTEGER,
+    title TEXT NOT NULL,
+    isFolder INTEGER NOT NULL DEFAULT 0,
+    content TEXT
+  );
 `);
 
 // Migrations for existing databases
@@ -71,6 +79,48 @@ const projectMigrations = [
 ];
 for (const sql of projectMigrations) {
   try { sqlite.exec(sql); } catch {}
+}
+
+// 首次启动时，把 data.ts 中的静态面经数据种入 docs 表，方便后台直接管理
+function seedDocs() {
+  const row = sqlite.prepare("SELECT COUNT(*) AS c FROM docs").get() as { c: number };
+  if (row.c > 0) return;
+  const insert = sqlite.prepare(
+    "INSERT INTO docs (parentId, title, isFolder, content) VALUES (?, ?, ?, ?)"
+  );
+  const walk = (nodes: typeof knowledgeDocs, parentId: number | null) => {
+    for (const n of nodes) {
+      const info = insert.run(parentId, n.title, n.isFolder ? 1 : 0, n.content ?? null);
+      if (n.children && n.children.length > 0) {
+        walk(n.children, Number(info.lastInsertRowid));
+      }
+    }
+  };
+  const seedAll = sqlite.transaction(() => walk(knowledgeDocs, null));
+  seedAll();
+}
+seedDocs();
+
+// 把扁平的 docs 行组装成嵌套树（id 转为 string 以匹配前端 DocNode）
+function buildDocTree(parentId: number | null): any[] {
+  const rows = (parentId === null
+    ? sqlite.prepare("SELECT * FROM docs WHERE parentId IS NULL ORDER BY id").all()
+    : sqlite.prepare("SELECT * FROM docs WHERE parentId = ? ORDER BY id").all(parentId)
+  ) as any[];
+  return rows.map((r) => ({
+    id: String(r.id),
+    title: r.title,
+    isFolder: !!r.isFolder,
+    content: r.content ?? undefined,
+    children: r.isFolder ? buildDocTree(r.id) : undefined,
+  }));
+}
+
+// 递归删除某个节点及其全部子节点
+function deleteDocRecursive(id: number) {
+  const children = sqlite.prepare("SELECT id FROM docs WHERE parentId = ?").all(id) as { id: number }[];
+  for (const c of children) deleteDocRecursive(c.id);
+  sqlite.prepare("DELETE FROM docs WHERE id = ?").run(id);
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key_12345";
@@ -90,7 +140,7 @@ function requireAuth(req: any, res: any, next: any) {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
 
@@ -207,6 +257,33 @@ async function startServer() {
 
   app.delete("/api/posts/:id", requireAuth, (req, res) => {
     sqlite.prepare("DELETE FROM posts WHERE id=?").run(req.params.id);
+    res.json({ ok: true });
+  });
+
+  // Docs (面经体系) API —— 嵌套树形结构
+  app.get("/api/docs", (req, res) => {
+    res.json(buildDocTree(null));
+  });
+
+  app.post("/api/docs", requireAuth, (req, res) => {
+    const { parentId, title, isFolder, content } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: "标题不能为空" });
+    }
+    const info = sqlite.prepare(
+      "INSERT INTO docs (parentId, title, isFolder, content) VALUES (?, ?, ?, ?)"
+    ).run(parentId ?? null, title, isFolder ? 1 : 0, isFolder ? null : (content ?? ""));
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.put("/api/docs/:id", requireAuth, (req, res) => {
+    const { title, content } = req.body;
+    sqlite.prepare("UPDATE docs SET title=?, content=? WHERE id=?").run(title, content ?? null, req.params.id);
+    res.json({ ok: true });
+  });
+
+  app.delete("/api/docs/:id", requireAuth, (req, res) => {
+    deleteDocRecursive(Number(req.params.id));
     res.json({ ok: true });
   });
 

@@ -3,9 +3,10 @@ import { motion, AnimatePresence } from "motion/react";
 import { Link } from "react-router-dom";
 import {
   LayoutDashboard, FileText, BookOpen, Layers,
-  Plus, Edit3, Trash2, ArrowLeft, Save, UploadCloud, X, LogOut, Loader2
+  Plus, Edit3, Trash2, ArrowLeft, Save, UploadCloud, X, LogOut, Loader2,
+  ChevronRight, ChevronDown, Folder, FolderPlus, FilePlus
 } from "lucide-react";
-import { knowledgeDocs } from "../data";
+import type { DocNode } from "../data";
 
 type AdminTab = "overview" | "projects" | "blog" | "docs";
 
@@ -31,8 +32,11 @@ interface ApiPost {
 }
 
 type EditingContext = {
-  type: "project" | "blog";
-  item: ApiProject | ApiPost | null;
+  type: "project" | "blog" | "doc";
+  item: ApiProject | ApiPost | DocNode | null;
+  // 仅 doc 新建时使用
+  parentId?: string | null;
+  isFolder?: boolean;
 } | null;
 
 // 安全解析 JSON 数组字符串，失败时回退为空数组
@@ -45,6 +49,11 @@ function safeParseArray(value: string): string[] {
   }
 }
 
+// 递归统计文档（非文件夹）数量
+function countDocs(nodes: DocNode[]): number {
+  return nodes.reduce((acc, n) => acc + (n.isFolder ? countDocs(n.children ?? []) : 1), 0);
+}
+
 export function AdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [editingContext, setEditingContext] = useState<EditingContext>(null);
@@ -53,6 +62,7 @@ export function AdminPage() {
 
   const [apiProjects, setApiProjects] = useState<ApiProject[]>([]);
   const [apiPosts, setApiPosts] = useState<ApiPost[]>([]);
+  const [apiDocs, setApiDocs] = useState<DocNode[]>([]);
 
   // Form state for editor modal
   const [formTitle, setFormTitle] = useState("");
@@ -77,12 +87,14 @@ export function AdminPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [projRes, postsRes] = await Promise.all([
+      const [projRes, postsRes, docsRes] = await Promise.all([
         fetch("/api/projects"),
         fetch("/api/posts"),
+        fetch("/api/docs"),
       ]);
       if (projRes.ok) setApiProjects(await projRes.json());
       if (postsRes.ok) setApiPosts(await postsRes.json());
+      if (docsRes.ok) setApiDocs(await docsRes.json());
     } catch {}
   }, []);
 
@@ -147,6 +159,9 @@ export function AdminPage() {
       setFormImageUrl(p.imageUrl ?? "");
       setFormLink(p.link ?? "");
       setFormGithub(p.github ?? "");
+    } else if (editingContext.type === "doc") {
+      const p = item as DocNode;
+      setFormContent(p.content ?? "");
     } else {
       const p = item as ApiPost;
       setFormSnippet(p.snippet ?? "");
@@ -182,6 +197,19 @@ export function AdminPage() {
         } else {
           await fetch("/api/projects", { method: "POST", headers, body: JSON.stringify(body) });
         }
+      } else if (editingContext.type === "doc") {
+        if (editingContext.item) {
+          const body = { title: formTitle, content: formContent };
+          await fetch(`/api/docs/${(editingContext.item as DocNode).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+        } else {
+          const body = {
+            parentId: editingContext.parentId ?? null,
+            title: formTitle,
+            isFolder: editingContext.isFolder ?? false,
+            content: formContent,
+          };
+          await fetch("/api/docs", { method: "POST", headers, body: JSON.stringify(body) });
+        }
       } else {
         const body = { title: formTitle, snippet: formSnippet, date: formDate, readTime: formReadTime, content: formContent };
         if (editingContext.item) {
@@ -197,11 +225,11 @@ export function AdminPage() {
     }
   };
 
-  const handleDelete = async (type: "project" | "blog", id: number) => {
-    if (!confirm("确定要删除吗？")) return;
+  const handleDelete = async (type: "project" | "blog" | "doc", id: number | string, message = "确定要删除吗？") => {
+    if (!confirm(message)) return;
     const headers = { Authorization: `Bearer ${token}` };
-    const url = type === "project" ? `/api/projects/${id}` : `/api/posts/${id}`;
-    await fetch(url, { method: "DELETE", headers });
+    const base = type === "project" ? "projects" : type === "doc" ? "docs" : "posts";
+    await fetch(`/api/${base}/${id}`, { method: "DELETE", headers });
     await fetchData();
   };
 
@@ -209,6 +237,14 @@ export function AdminPage() {
     localStorage.removeItem("adminToken");
     setToken(null);
   };
+
+  // 当前正在编辑的面经节点是否为目录
+  const editingDocIsFolder =
+    editingContext?.type === "doc"
+      ? editingContext.item
+        ? (editingContext.item as DocNode).isFolder
+        : !!editingContext.isFolder
+      : false;
 
   if (loading) {
     return (
@@ -307,6 +343,7 @@ export function AdminPage() {
             <OverviewTab
               projectCount={apiProjects.length}
               postCount={apiPosts.length}
+              docCount={countDocs(apiDocs)}
               onTabChange={setActiveTab}
             />
           )}
@@ -326,7 +363,21 @@ export function AdminPage() {
               onDelete={(id) => handleDelete("blog", id)}
             />
           )}
-          {activeTab === "docs" && <DocsManager />}
+          {activeTab === "docs" && (
+            <DocsManager
+              docs={apiDocs}
+              onNewRoot={(isFolder) => setEditingContext({ type: "doc", item: null, parentId: null, isFolder })}
+              onNewChild={(parentId, isFolder) => setEditingContext({ type: "doc", item: null, parentId, isFolder })}
+              onEdit={(item) => setEditingContext({ type: "doc", item })}
+              onDelete={(node) =>
+                handleDelete(
+                  "doc",
+                  node.id,
+                  node.isFolder ? `确定删除目录「${node.title}」及其下所有内容吗？` : `确定删除文档「${node.title}」吗？`
+                )
+              }
+            />
+          )}
         </div>
       </div>
 
@@ -349,7 +400,15 @@ export function AdminPage() {
             >
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
                 <h3 className="font-bold text-lg text-gray-900">
-                  {editingContext.item ? "编辑内容" : editingContext.type === "project" ? "新增项目" : "写新文章"}
+                  {editingContext.type === "doc"
+                    ? editingContext.item
+                      ? (editingDocIsFolder ? "重命名目录" : "编辑文档")
+                      : (editingContext.isFolder ? "新建目录" : "新建文档")
+                    : editingContext.item
+                    ? "编辑内容"
+                    : editingContext.type === "project"
+                    ? "新增项目"
+                    : "写新文章"}
                 </h3>
                 <button onClick={() => setEditingContext(null)} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors">
                   <X className="w-5 h-5" />
@@ -475,7 +534,7 @@ export function AdminPage() {
                       )}
                     </div>
                   </>
-                ) : (
+                ) : editingContext.type === "blog" ? (
                   <>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -510,9 +569,9 @@ export function AdminPage() {
                       />
                     </div>
                   </>
-                )}
+                ) : null}
 
-                {editingContext.type === "blog" && (
+                {(editingContext.type === "blog" || (editingContext.type === "doc" && !editingDocIsFolder)) && (
                   <div className="flex-1 flex flex-col">
                     <label className="block text-sm font-medium text-gray-700 mb-2">Markdown 正文内容</label>
                     <textarea
@@ -556,15 +615,7 @@ function NavItem({ icon, label, isActive, onClick }: { icon: React.ReactNode; la
   );
 }
 
-function OverviewTab({ projectCount, postCount, onTabChange }: { projectCount: number; postCount: number; onTabChange: (tab: AdminTab) => void }) {
-  const docCount = knowledgeDocs.reduce((acc, node) => {
-    const countDocs = (n: typeof node): number => {
-      if (!n.isFolder) return 1;
-      return (n.children ?? []).reduce((s, c) => s + countDocs(c), 0);
-    };
-    return acc + countDocs(node);
-  }, 0);
-
+function OverviewTab({ projectCount, postCount, docCount, onTabChange }: { projectCount: number; postCount: number; docCount: number; onTabChange: (tab: AdminTab) => void }) {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
       <h1 className="text-3xl font-bold text-gray-900 mb-8">数据总览</h1>
@@ -698,61 +749,127 @@ function BlogManager({
   );
 }
 
-function DocsManager() {
+function DocsManager({
+  docs,
+  onNewRoot,
+  onNewChild,
+  onEdit,
+  onDelete,
+}: {
+  docs: DocNode[];
+  onNewRoot: (isFolder: boolean) => void;
+  onNewChild: (parentId: string, isFolder: boolean) => void;
+  onEdit: (node: DocNode) => void;
+  onDelete: (node: DocNode) => void;
+}) {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">面经文档库</h1>
-          <p className="text-gray-500">当前面经内容为静态内置数据，在博客页面可阅读</p>
+          <p className="text-gray-500">管理多层级的知识体系目录与文档内容</p>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={() => onNewRoot(true)} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors">
+            <FolderPlus className="w-5 h-5" /> 新建顶级目录
+          </button>
+          <button onClick={() => onNewRoot(false)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors">
+            <FilePlus className="w-5 h-5" /> 新建顶级文档
+          </button>
         </div>
       </div>
-      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="p-6 bg-amber-50 border-b border-amber-100">
-          <p className="text-amber-700 text-sm font-medium">面经内容目前维护在 <code className="bg-amber-100 px-1.5 py-0.5 rounded font-mono">src/data.ts</code> 中，如需修改请直接编辑该文件。</p>
-        </div>
-        <DocsTreePreview />
+
+      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-4">
+        {docs.length === 0 ? (
+          <div className="p-12 text-center text-gray-400">
+            <BookOpen className="w-12 h-12 text-gray-200 mx-auto mb-4" />
+            <p>暂无面经内容，点击右上角新建目录或文档</p>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {docs.map((node) => (
+              <DocTreeNode
+                key={node.id}
+                node={node}
+                level={0}
+                onNewChild={onNewChild}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </motion.div>
   );
 }
 
-function DocsTreePreview() {
-  return (
-    <div className="p-6 space-y-2">
-      {knowledgeDocs.map((root) => (
-        <DocFolder key={root.id} node={root} level={0} />
-      ))}
-    </div>
-  );
-}
-
-function DocFolder({ node, level }: { node: typeof knowledgeDocs[number]; level: number }) {
+function DocTreeNode({
+  node,
+  level,
+  onNewChild,
+  onEdit,
+  onDelete,
+}: {
+  node: DocNode;
+  level: number;
+  onNewChild: (parentId: string, isFolder: boolean) => void;
+  onEdit: (node: DocNode) => void;
+  onDelete: (node: DocNode) => void;
+}) {
   const [open, setOpen] = useState(level === 0);
-
-  if (!node.isFolder) {
-    return (
-      <div className="flex items-center gap-2 py-1 px-2 rounded-lg text-gray-600 text-sm" style={{ paddingLeft: `${level * 16 + 8}px` }}>
-        <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        {node.title}
-      </div>
-    );
-  }
 
   return (
     <div>
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 text-gray-700 text-sm font-medium transition-colors"
-        style={{ paddingLeft: `${level * 16 + 8}px` }}
+      <div
+        className="group flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-gray-50 transition-colors"
+        style={{ paddingLeft: `${level * 20 + 8}px` }}
       >
-        <BookOpen className="w-4 h-4 text-teal-500 shrink-0" />
-        {node.title}
-      </button>
-      {open && node.children && (
+        {node.isFolder ? (
+          <button onClick={() => setOpen(!open)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+            {open ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
+            <Folder className="w-4 h-4 text-teal-600 shrink-0" />
+            <span className="text-sm font-medium text-gray-700 truncate">{node.title}</span>
+          </button>
+        ) : (
+          <button onClick={() => onEdit(node)} className="flex items-center gap-2 flex-1 min-w-0 text-left pl-6">
+            <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+            <span className="text-sm text-gray-600 truncate">{node.title}</span>
+          </button>
+        )}
+
+        {/* 操作按钮（hover 显示） */}
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          {node.isFolder && (
+            <>
+              <button onClick={() => onNewChild(node.id, true)} title="新建子目录" className="p-1.5 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-md transition-colors">
+                <FolderPlus className="w-4 h-4" />
+              </button>
+              <button onClick={() => onNewChild(node.id, false)} title="新建子文档" className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
+                <FilePlus className="w-4 h-4" />
+              </button>
+            </>
+          )}
+          <button onClick={() => onEdit(node)} title={node.isFolder ? "重命名" : "编辑"} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors">
+            <Edit3 className="w-4 h-4" />
+          </button>
+          <button onClick={() => onDelete(node)} title="删除" className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {node.isFolder && open && node.children && node.children.length > 0 && (
         <div>
           {node.children.map((child) => (
-            <DocFolder key={child.id} node={child} level={level + 1} />
+            <DocTreeNode
+              key={child.id}
+              node={child}
+              level={level + 1}
+              onNewChild={onNewChild}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
           ))}
         </div>
       )}
