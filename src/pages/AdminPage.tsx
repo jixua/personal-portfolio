@@ -1,0 +1,655 @@
+import { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { Link } from "react-router-dom";
+import {
+  LayoutDashboard, FileText, BookOpen, Layers,
+  Plus, Edit3, Trash2, ArrowLeft, Save, UploadCloud, X, LogOut, Loader2
+} from "lucide-react";
+import { knowledgeDocs } from "../data";
+
+type AdminTab = "overview" | "projects" | "blog" | "docs";
+
+interface ApiProject {
+  id: number;
+  title: string;
+  description: string | null;
+  content: string | null;
+  imageUrl: string | null;
+}
+
+interface ApiPost {
+  id: number;
+  title: string;
+  snippet: string | null;
+  date: string | null;
+  readTime: string | null;
+  content: string | null;
+}
+
+type EditingContext = {
+  type: "project" | "blog";
+  item: ApiProject | ApiPost | null;
+} | null;
+
+export function AdminPage() {
+  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const [editingContext, setEditingContext] = useState<EditingContext>(null);
+  const [token, setToken] = useState<string | null>(localStorage.getItem("adminToken"));
+  const [loading, setLoading] = useState(true);
+
+  const [apiProjects, setApiProjects] = useState<ApiProject[]>([]);
+  const [apiPosts, setApiPosts] = useState<ApiPost[]>([]);
+
+  // Form state for editor modal
+  const [formTitle, setFormTitle] = useState("");
+  const [formDescription, setFormDescription] = useState("");
+  const [formSnippet, setFormSnippet] = useState("");
+  const [formContent, setFormContent] = useState("");
+  const [formImageUrl, setFormImageUrl] = useState("");
+  const [formDate, setFormDate] = useState("");
+  const [formReadTime, setFormReadTime] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [authError, setAuthError] = useState("");
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [projRes, postsRes] = await Promise.all([
+        fetch("/api/projects"),
+        fetch("/api/posts"),
+      ]);
+      if (projRes.ok) setApiProjects(await projRes.json());
+      if (postsRes.ok) setApiPosts(await postsRes.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (token) {
+      fetch("/api/auth/verify", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => {
+          if (!res.ok) {
+            localStorage.removeItem("adminToken");
+            setToken(null);
+          } else {
+            fetchData();
+          }
+        })
+        .catch(() => {
+          localStorage.removeItem("adminToken");
+          setToken(null);
+        })
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, [token, fetchData]);
+
+  // Populate form when editing context opens
+  useEffect(() => {
+    if (!editingContext) return;
+    if (!editingContext.item) {
+      setFormTitle("");
+      setFormDescription("");
+      setFormSnippet("");
+      setFormContent("");
+      setFormImageUrl("");
+      setFormDate(new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" }));
+      setFormReadTime("5 分钟阅读");
+      return;
+    }
+    const item = editingContext.item;
+    setFormTitle(item.title ?? "");
+    setFormContent((item as any).content ?? "");
+    if (editingContext.type === "project") {
+      const p = item as ApiProject;
+      setFormDescription(p.description ?? "");
+      setFormSnippet("");
+      setFormImageUrl(p.imageUrl ?? "");
+      setFormDate("");
+      setFormReadTime("");
+    } else {
+      const p = item as ApiPost;
+      setFormDescription("");
+      setFormSnippet(p.snippet ?? "");
+      setFormImageUrl("");
+      setFormDate(p.date ?? "");
+      setFormReadTime(p.readTime ?? "");
+    }
+  }, [editingContext]);
+
+  const handleSave = async () => {
+    if (!editingContext) return;
+    setSaving(true);
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+    try {
+      if (editingContext.type === "project") {
+        const body = { title: formTitle, description: formDescription, content: formContent, imageUrl: formImageUrl };
+        if (editingContext.item) {
+          await fetch(`/api/projects/${(editingContext.item as ApiProject).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+        } else {
+          await fetch("/api/projects", { method: "POST", headers, body: JSON.stringify(body) });
+        }
+      } else {
+        const body = { title: formTitle, snippet: formSnippet, date: formDate, readTime: formReadTime, content: formContent };
+        if (editingContext.item) {
+          await fetch(`/api/posts/${(editingContext.item as ApiPost).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+        } else {
+          await fetch("/api/posts", { method: "POST", headers, body: JSON.stringify(body) });
+        }
+      }
+      await fetchData();
+      setEditingContext(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (type: "project" | "blog", id: number) => {
+    if (!confirm("确定要删除吗？")) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    const url = type === "project" ? `/api/projects/${id}` : `/api/posts/${id}`;
+    await fetch(url, { method: "DELETE", headers });
+    await fetchData();
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("adminToken");
+    setToken(null);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+      </div>
+    );
+  }
+
+  if (!token) {
+    const handleAuth = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setAuthError("");
+      try {
+        const endpoint = isRegistering ? "/api/auth/register" : "/api/auth/login";
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "认证失败");
+        localStorage.setItem("adminToken", data.token);
+        setToken(data.token);
+      } catch (err: any) {
+        setAuthError(err.message);
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+        <Link to="/" className="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-indigo-600 transition-colors mb-8">
+          <ArrowLeft className="w-4 h-4" /> 返回主站
+        </Link>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md bg-white p-8 rounded-3xl shadow-xl shadow-gray-200/50 border border-gray-100">
+          <div className="flex items-center gap-3 text-gray-900 font-bold text-2xl tracking-tight mb-2 justify-center">
+            <LayoutDashboard className="w-8 h-8 text-indigo-600" />
+            内容管理中心
+          </div>
+          <p className="text-gray-500 text-center mb-8">{isRegistering ? "创建管理员账号" : "登录以管理您的作品集和博客"}</p>
+          <form onSubmit={handleAuth} className="space-y-4">
+            {authError && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl">{authError}</div>}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">邮箱</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">密码</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all" />
+            </div>
+            <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors">
+              {isRegistering ? "注册" : "登录"}
+            </button>
+          </form>
+          <div className="mt-6 text-center text-sm text-gray-500">
+            {isRegistering ? "已有账号？" : "初次使用？"}
+            <button onClick={() => setIsRegistering(!isRegistering)} className="text-indigo-600 font-medium ml-1 hover:underline">
+              {isRegistering ? "去登录" : "创建账号"}
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex">
+      {/* Sidebar */}
+      <div className="w-64 bg-white border-r border-gray-200 flex flex-col fixed h-full z-20">
+        <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+          <div className="flex items-center gap-3 text-gray-900 font-bold text-xl tracking-tight">
+            <LayoutDashboard className="w-6 h-6 text-indigo-600" />
+            管理中心
+          </div>
+        </div>
+        <div className="p-4 space-y-1 flex-1">
+          <NavItem icon={<LayoutDashboard className="w-5 h-5" />} label="数据总览" isActive={activeTab === "overview"} onClick={() => setActiveTab("overview")} />
+          <NavItem icon={<Layers className="w-5 h-5" />} label="作品集管理" isActive={activeTab === "projects"} onClick={() => setActiveTab("projects")} />
+          <NavItem icon={<FileText className="w-5 h-5" />} label="博客文章" isActive={activeTab === "blog"} onClick={() => setActiveTab("blog")} />
+          <NavItem icon={<BookOpen className="w-5 h-5" />} label="面经体系" isActive={activeTab === "docs"} onClick={() => setActiveTab("docs")} />
+        </div>
+        <div className="p-4 border-t border-gray-100 space-y-2">
+          <Link to="/" className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-gray-600 hover:bg-gray-100 transition-colors">
+            <ArrowLeft className="w-4 h-4" /> 返回主站
+          </Link>
+          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-red-600 hover:bg-red-50 transition-colors">
+            <LogOut className="w-4 h-4" /> 退出登录
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="ml-64 flex-1 p-8">
+        <div className="max-w-5xl mx-auto">
+          {activeTab === "overview" && (
+            <OverviewTab
+              projectCount={apiProjects.length}
+              postCount={apiPosts.length}
+              onTabChange={setActiveTab}
+            />
+          )}
+          {activeTab === "projects" && (
+            <ProjectsManager
+              projects={apiProjects}
+              onNew={() => setEditingContext({ type: "project", item: null })}
+              onEdit={(item) => setEditingContext({ type: "project", item })}
+              onDelete={(id) => handleDelete("project", id)}
+            />
+          )}
+          {activeTab === "blog" && (
+            <BlogManager
+              posts={apiPosts}
+              onNew={() => setEditingContext({ type: "blog", item: null })}
+              onEdit={(item) => setEditingContext({ type: "blog", item })}
+              onDelete={(id) => handleDelete("blog", id)}
+            />
+          )}
+          {activeTab === "docs" && <DocsManager />}
+        </div>
+      </div>
+
+      {/* Editor Modal */}
+      <AnimatePresence>
+        {editingContext && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setEditingContext(null)}
+              className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-40"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="fixed top-10 bottom-10 left-1/2 -translate-x-1/2 w-full max-w-4xl bg-white rounded-3xl shadow-2xl z-50 flex flex-col overflow-hidden"
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                <h3 className="font-bold text-lg text-gray-900">
+                  {editingContext.item ? "编辑内容" : editingContext.type === "project" ? "新增项目" : "写新文章"}
+                </h3>
+                <button onClick={() => setEditingContext(null)} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar flex flex-col gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">标题</label>
+                  <input
+                    type="text"
+                    value={formTitle}
+                    onChange={(e) => setFormTitle(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                    placeholder="输入标题..."
+                  />
+                </div>
+
+                {editingContext.type === "project" ? (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">简介</label>
+                      <textarea
+                        value={formDescription}
+                        onChange={(e) => setFormDescription(e.target.value)}
+                        rows={3}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                        placeholder="项目简介..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">封面图片</label>
+                      <div className="flex gap-3 items-start">
+                        <input
+                          type="text"
+                          value={formImageUrl}
+                          onChange={(e) => setFormImageUrl(e.target.value)}
+                          className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          placeholder="图片 URL 或上传..."
+                        />
+                        <label className="h-12 px-4 border-2 border-dashed border-gray-200 rounded-xl flex items-center gap-2 text-gray-400 hover:text-indigo-500 hover:border-indigo-500 hover:bg-indigo-50/50 transition-all cursor-pointer shrink-0">
+                          <input
+                            type="file"
+                            className="hidden"
+                            accept="image/*"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const formData = new FormData();
+                                formData.append("file", file);
+                                try {
+                                  const res = await fetch("/api/upload", { method: "POST", body: formData });
+                                  const data = await res.json();
+                                  if (data.url) setFormImageUrl(data.url);
+                                } catch {
+                                  alert("上传失败");
+                                }
+                              }
+                            }}
+                          />
+                          <UploadCloud className="w-5 h-5" />
+                          <span className="text-sm font-medium">上传</span>
+                        </label>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">日期</label>
+                        <input
+                          type="text"
+                          value={formDate}
+                          onChange={(e) => setFormDate(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          placeholder="2026年6月24日"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">阅读时间</label>
+                        <input
+                          type="text"
+                          value={formReadTime}
+                          onChange={(e) => setFormReadTime(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          placeholder="5 分钟阅读"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">摘要</label>
+                      <textarea
+                        value={formSnippet}
+                        onChange={(e) => setFormSnippet(e.target.value)}
+                        rows={3}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                        placeholder="文章摘要，显示在列表页..."
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className="flex-1 flex flex-col">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Markdown 正文内容</label>
+                  <textarea
+                    value={formContent}
+                    onChange={(e) => setFormContent(e.target.value)}
+                    className="w-full flex-1 min-h-[300px] p-4 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-sm resize-none"
+                    placeholder="支持 Markdown 语法..."
+                  />
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+                <button onClick={() => setEditingContext(null)} className="px-6 py-2.5 rounded-xl font-medium text-gray-600 hover:bg-gray-200 transition-colors">
+                  取消
+                </button>
+                <button onClick={handleSave} disabled={saving || !formTitle.trim()} className="px-6 py-2.5 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  保存发布
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function NavItem({ icon, label, isActive, onClick }: { icon: React.ReactNode; label: string; isActive: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+        isActive ? "bg-indigo-50 text-indigo-600 font-bold" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 font-medium"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function OverviewTab({ projectCount, postCount, onTabChange }: { projectCount: number; postCount: number; onTabChange: (tab: AdminTab) => void }) {
+  const docCount = knowledgeDocs.reduce((acc, node) => {
+    const countDocs = (n: typeof node): number => {
+      if (!n.isFolder) return 1;
+      return (n.children ?? []).reduce((s, c) => s + countDocs(c), 0);
+    };
+    return acc + countDocs(node);
+  }, 0);
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+      <h1 className="text-3xl font-bold text-gray-900 mb-8">数据总览</h1>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <StatCard icon={<Layers />} title="作品集" count={projectCount} onClick={() => onTabChange("projects")} color="indigo" />
+        <StatCard icon={<FileText />} title="博客文章" count={postCount} onClick={() => onTabChange("blog")} color="teal" />
+        <StatCard icon={<BookOpen />} title="面经文档" count={docCount} onClick={() => onTabChange("docs")} color="blue" />
+      </div>
+    </motion.div>
+  );
+}
+
+function StatCard({ icon, title, count, onClick, color }: { icon: React.ReactNode; title: string; count: number; onClick: () => void; color: string }) {
+  const colorMap: Record<string, string> = {
+    indigo: "bg-indigo-50 text-indigo-600",
+    teal: "bg-teal-50 text-teal-600",
+    blue: "bg-blue-50 text-blue-600",
+  };
+  return (
+    <div onClick={onClick} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group">
+      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-4 ${colorMap[color]}`}>{icon}</div>
+      <div className="text-gray-500 font-medium mb-1">{title}</div>
+      <div className="text-4xl font-black text-gray-900">{count}</div>
+    </div>
+  );
+}
+
+function ProjectsManager({
+  projects,
+  onNew,
+  onEdit,
+  onDelete,
+}: {
+  projects: ApiProject[];
+  onNew: () => void;
+  onEdit: (item: ApiProject) => void;
+  onDelete: (id: number) => void;
+}) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-3xl font-bold text-gray-900">作品集管理</h1>
+        <button onClick={onNew} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors">
+          <Plus className="w-5 h-5" /> 新增项目
+        </button>
+      </div>
+      {projects.length === 0 ? (
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-12 text-center text-gray-400">
+          <Layers className="w-12 h-12 text-gray-200 mx-auto mb-4" />
+          <p>暂无项目，点击右上角新增</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {projects.map((p) => (
+            <div key={p.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-4">
+              {p.imageUrl && (
+                <div className="h-40 rounded-xl bg-gray-100 overflow-hidden">
+                  <img src={p.imageUrl} className="w-full h-full object-cover" alt="" />
+                </div>
+              )}
+              <div>
+                <h3 className="font-bold text-lg text-gray-900">{p.title}</h3>
+                {p.description && <p className="text-gray-500 text-sm mt-1 line-clamp-2">{p.description}</p>}
+              </div>
+              <div className="flex items-center gap-2 mt-auto pt-4 border-t border-gray-50">
+                <button onClick={() => onEdit(p)} className="flex-1 flex items-center justify-center gap-2 py-2 bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium rounded-lg transition-colors text-sm">
+                  <Edit3 className="w-4 h-4" /> 编辑
+                </button>
+                <button onClick={() => onDelete(p.id)} className="flex items-center justify-center p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function BlogManager({
+  posts,
+  onNew,
+  onEdit,
+  onDelete,
+}: {
+  posts: ApiPost[];
+  onNew: () => void;
+  onEdit: (item: ApiPost) => void;
+  onDelete: (id: number) => void;
+}) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-3xl font-bold text-gray-900">博客管理</h1>
+        <button onClick={onNew} className="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors">
+          <Plus className="w-5 h-5" /> 写新文章
+        </button>
+      </div>
+      {posts.length === 0 ? (
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-12 text-center text-gray-400">
+          <FileText className="w-12 h-12 text-gray-200 mx-auto mb-4" />
+          <p>暂无文章，点击右上角新建</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="divide-y divide-gray-100">
+            {posts.map((p) => (
+              <div key={p.id} className="p-6 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <div>
+                  <h3 className="font-bold text-lg text-gray-900 mb-1">{p.title}</h3>
+                  <div className="flex gap-4 text-sm text-gray-500">
+                    {p.date && <span>{p.date}</span>}
+                    {p.readTime && <span>{p.readTime}</span>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => onEdit(p)} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
+                    <Edit3 className="w-5 h-5" />
+                  </button>
+                  <button onClick={() => onDelete(p.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function DocsManager() {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">面经文档库</h1>
+          <p className="text-gray-500">当前面经内容为静态内置数据，在博客页面可阅读</p>
+        </div>
+      </div>
+      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="p-6 bg-amber-50 border-b border-amber-100">
+          <p className="text-amber-700 text-sm font-medium">面经内容目前维护在 <code className="bg-amber-100 px-1.5 py-0.5 rounded font-mono">src/data.ts</code> 中，如需修改请直接编辑该文件。</p>
+        </div>
+        <DocsTreePreview />
+      </div>
+    </motion.div>
+  );
+}
+
+function DocsTreePreview() {
+  return (
+    <div className="p-6 space-y-2">
+      {knowledgeDocs.map((root) => (
+        <DocFolder key={root.id} node={root} level={0} />
+      ))}
+    </div>
+  );
+}
+
+function DocFolder({ node, level }: { node: typeof knowledgeDocs[number]; level: number }) {
+  const [open, setOpen] = useState(level === 0);
+
+  if (!node.isFolder) {
+    return (
+      <div className="flex items-center gap-2 py-1 px-2 rounded-lg text-gray-600 text-sm" style={{ paddingLeft: `${level * 16 + 8}px` }}>
+        <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+        {node.title}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 text-gray-700 text-sm font-medium transition-colors"
+        style={{ paddingLeft: `${level * 16 + 8}px` }}
+      >
+        <BookOpen className="w-4 h-4 text-teal-500 shrink-0" />
+        {node.title}
+      </button>
+      {open && node.children && (
+        <div>
+          {node.children.map((child) => (
+            <DocFolder key={child.id} node={child} level={level + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

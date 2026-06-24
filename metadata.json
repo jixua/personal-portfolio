@@ -1,0 +1,6 @@
+{
+  "name": "Personal Portfolio",
+  "description": "A sleek personal website landing page showcasing projects, skills, and blog posts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
