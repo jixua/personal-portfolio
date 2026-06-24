@@ -22,7 +22,7 @@ export function Navbar() {
         </div>
 
         <div className="flex items-center gap-3">
-          <a href="#" className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all">
+          <a href="https://github.com/jixua" target="_blank" rel="noopener noreferrer" className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all">
             <Github className="w-5 h-5" />
           </a>
           <a href="mailto:jixu0090@gmail.com" className="p-2 text-gray-400 hover:text-black hover:bg-gray-100 rounded-full transition-all md:hidden">

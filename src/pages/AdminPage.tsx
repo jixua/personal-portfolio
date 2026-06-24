@@ -13,8 +13,12 @@ interface ApiProject {
   id: number;
   title: string;
   description: string | null;
-  content: string | null;
+  longDescription: string | null;
+  features: string | null; // JSON 数组字符串
+  tags: string | null; // JSON 数组字符串
   imageUrl: string | null;
+  link: string | null;
+  github: string | null;
 }
 
 interface ApiPost {
@@ -30,6 +34,16 @@ type EditingContext = {
   type: "project" | "blog";
   item: ApiProject | ApiPost | null;
 } | null;
+
+// 安全解析 JSON 数组字符串，失败时回退为空数组
+function safeParseArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 export function AdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
@@ -48,6 +62,12 @@ export function AdminPage() {
   const [formImageUrl, setFormImageUrl] = useState("");
   const [formDate, setFormDate] = useState("");
   const [formReadTime, setFormReadTime] = useState("");
+  // 项目专属字段
+  const [formLongDescription, setFormLongDescription] = useState("");
+  const [formFeatures, setFormFeatures] = useState(""); // 每行一个特性
+  const [formTags, setFormTags] = useState(""); // 逗号分隔
+  const [formLink, setFormLink] = useState("");
+  const [formGithub, setFormGithub] = useState("");
   const [saving, setSaving] = useState(false);
 
   const [email, setEmail] = useState("");
@@ -92,31 +112,45 @@ export function AdminPage() {
   // Populate form when editing context opens
   useEffect(() => {
     if (!editingContext) return;
+    // 统一重置所有字段
+    setFormTitle("");
+    setFormDescription("");
+    setFormSnippet("");
+    setFormContent("");
+    setFormImageUrl("");
+    setFormLongDescription("");
+    setFormFeatures("");
+    setFormTags("");
+    setFormLink("");
+    setFormGithub("");
+
     if (!editingContext.item) {
-      setFormTitle("");
-      setFormDescription("");
-      setFormSnippet("");
-      setFormContent("");
-      setFormImageUrl("");
-      setFormDate(new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" }));
-      setFormReadTime("5 分钟阅读");
+      // 新建
+      if (editingContext.type === "blog") {
+        setFormDate(new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" }));
+        setFormReadTime("5 分钟阅读");
+      } else {
+        setFormDate("");
+        setFormReadTime("");
+      }
       return;
     }
+
     const item = editingContext.item;
     setFormTitle(item.title ?? "");
-    setFormContent((item as any).content ?? "");
     if (editingContext.type === "project") {
       const p = item as ApiProject;
       setFormDescription(p.description ?? "");
-      setFormSnippet("");
+      setFormLongDescription(p.longDescription ?? "");
+      setFormFeatures(p.features ? safeParseArray(p.features).join("\n") : "");
+      setFormTags(p.tags ? safeParseArray(p.tags).join(", ") : "");
       setFormImageUrl(p.imageUrl ?? "");
-      setFormDate("");
-      setFormReadTime("");
+      setFormLink(p.link ?? "");
+      setFormGithub(p.github ?? "");
     } else {
       const p = item as ApiPost;
-      setFormDescription("");
       setFormSnippet(p.snippet ?? "");
-      setFormImageUrl("");
+      setFormContent(p.content ?? "");
       setFormDate(p.date ?? "");
       setFormReadTime(p.readTime ?? "");
     }
@@ -131,7 +165,18 @@ export function AdminPage() {
     };
     try {
       if (editingContext.type === "project") {
-        const body = { title: formTitle, description: formDescription, content: formContent, imageUrl: formImageUrl };
+        const features = formFeatures.split("\n").map((s) => s.trim()).filter(Boolean);
+        const tags = formTags.split(",").map((s) => s.trim()).filter(Boolean);
+        const body = {
+          title: formTitle,
+          description: formDescription,
+          longDescription: formLongDescription,
+          features: JSON.stringify(features),
+          tags: JSON.stringify(tags),
+          imageUrl: formImageUrl,
+          link: formLink,
+          github: formGithub,
+        };
         if (editingContext.item) {
           await fetch(`/api/projects/${(editingContext.item as ApiProject).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
         } else {
@@ -326,14 +371,68 @@ export function AdminPage() {
                 {editingContext.type === "project" ? (
                   <>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">简介</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">简介（卡片摘要）</label>
                       <textarea
                         value={formDescription}
                         onChange={(e) => setFormDescription(e.target.value)}
-                        rows={3}
+                        rows={2}
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
-                        placeholder="项目简介..."
+                        placeholder="一句话简介，显示在作品集卡片..."
                       />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">详细描述</label>
+                      <textarea
+                        value={formLongDescription}
+                        onChange={(e) => setFormLongDescription(e.target.value)}
+                        rows={4}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                        placeholder="项目详情页展示的完整介绍..."
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">技术标签（逗号分隔）</label>
+                        <input
+                          type="text"
+                          value={formTags}
+                          onChange={(e) => setFormTags(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          placeholder="Node.js, Redis, PostgreSQL"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">核心特性（每行一个）</label>
+                        <textarea
+                          value={formFeatures}
+                          onChange={(e) => setFormFeatures(e.target.value)}
+                          rows={1}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-y min-h-[48px]"
+                          placeholder="多租户隔离&#10;RBAC 权限校验"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">在线访问链接（可选）</label>
+                        <input
+                          type="text"
+                          value={formLink}
+                          onChange={(e) => setFormLink(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          placeholder="https://..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">源码链接（可选）</label>
+                        <input
+                          type="text"
+                          value={formGithub}
+                          onChange={(e) => setFormGithub(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          placeholder="https://github.com/..."
+                        />
+                      </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">封面图片</label>
@@ -369,6 +468,11 @@ export function AdminPage() {
                           <span className="text-sm font-medium">上传</span>
                         </label>
                       </div>
+                      {formImageUrl && (
+                        <div className="mt-3 h-32 rounded-xl overflow-hidden border border-gray-100 bg-gray-50">
+                          <img src={formImageUrl} className="w-full h-full object-cover" alt="预览" />
+                        </div>
+                      )}
                     </div>
                   </>
                 ) : (
@@ -408,15 +512,17 @@ export function AdminPage() {
                   </>
                 )}
 
-                <div className="flex-1 flex flex-col">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Markdown 正文内容</label>
-                  <textarea
-                    value={formContent}
-                    onChange={(e) => setFormContent(e.target.value)}
-                    className="w-full flex-1 min-h-[300px] p-4 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-sm resize-none"
-                    placeholder="支持 Markdown 语法..."
-                  />
-                </div>
+                {editingContext.type === "blog" && (
+                  <div className="flex-1 flex flex-col">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Markdown 正文内容</label>
+                    <textarea
+                      value={formContent}
+                      onChange={(e) => setFormContent(e.target.value)}
+                      className="w-full flex-1 min-h-[300px] p-4 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-sm resize-none"
+                      placeholder="支持 Markdown 语法..."
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">

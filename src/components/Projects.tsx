@@ -1,10 +1,11 @@
 import { motion } from "motion/react";
-import { projects } from "../data";
 import { Layers, ArrowUpRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useData } from "../context/DataContext";
 
 export function Projects() {
   const navigate = useNavigate();
+  const { projects } = useData();
 
   return (
     <section id="projects" className="py-20 px-6 relative z-10 flex items-center">

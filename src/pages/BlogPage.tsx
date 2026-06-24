@@ -3,9 +3,11 @@ import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronRight, ChevronDown, FileText, Folder, BookOpen, PenTool, ArrowLeft } from "lucide-react";
-import { blogPosts, knowledgeDocs, DocNode } from "../data";
+import { knowledgeDocs, DocNode } from "../data";
+import { useData } from "../context/DataContext";
 
 export function BlogPage() {
+  const { posts: blogPosts } = useData();
   const [searchParams, setSearchParams] = useSearchParams();
   const idFromUrl = searchParams.get("id");
   const tabFromUrl = searchParams.get("tab") as "blog" | "docs" | "intro";
@@ -194,19 +196,32 @@ export function BlogPage() {
           <button onClick={() => setActiveTab("intro")} className="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-indigo-600 transition-colors mb-4">
             <ArrowLeft className="w-4 h-4" /> 返回知识库首页
           </button>
-          
-          <div className="flex items-center gap-2 px-2 py-1">
-            {activeTab === "blog" ? (
-               <div className="flex items-center gap-2 text-indigo-600 font-bold">
-                 <PenTool className="w-5 h-5" />
-                 <span>博客文章</span>
-               </div>
-            ) : (
-               <div className="flex items-center gap-2 text-teal-600 font-bold">
-                 <BookOpen className="w-5 h-5" />
-                 <span>面经体系</span>
-               </div>
-            )}
+
+          {/* 博客 / 面经 切换 */}
+          <div className="grid grid-cols-2 gap-1 p-1 bg-gray-100 rounded-xl">
+            <button
+              onClick={() => {
+                setActiveTab("blog");
+                setActiveId(blogPosts[0]?.id || null);
+              }}
+              className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-bold transition-all ${
+                activeTab === "blog" ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <PenTool className="w-4 h-4" /> 博客
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab("docs");
+                const firstDoc = knowledgeDocs[0]?.children?.[0]?.children?.[0];
+                setActiveId(firstDoc?.id || null);
+              }}
+              className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-bold transition-all ${
+                activeTab === "docs" ? "bg-white text-teal-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <BookOpen className="w-4 h-4" /> 面经
+            </button>
           </div>
         </div>
         

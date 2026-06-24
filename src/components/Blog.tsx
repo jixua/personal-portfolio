@@ -1,9 +1,10 @@
 import { motion } from "motion/react";
-import { blogPosts } from "../data";
 import { BookOpen, Calendar, Clock, ArrowRight, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useData } from "../context/DataContext";
 
 export function Blog() {
+  const { posts: blogPosts } = useData();
   return (
     <section id="blog" className="py-24 px-6 relative z-10 overflow-hidden">
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-16 lg:gap-8">

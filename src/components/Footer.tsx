@@ -22,7 +22,7 @@ export function Footer() {
           <Link to="/admin" className="p-3 text-gray-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all" title="内容管理后台">
             <Lock className="w-5 h-5" />
           </Link>
-          <a href="#" className="p-3 text-gray-400 hover:text-black hover:bg-gray-100 rounded-full transition-all">
+          <a href="https://github.com/jixua" target="_blank" rel="noopener noreferrer" className="p-3 text-gray-400 hover:text-black hover:bg-gray-100 rounded-full transition-all">
             <Github className="w-5 h-5" />
           </a>
         </div>

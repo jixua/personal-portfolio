@@ -1,9 +1,10 @@
 import { motion } from "motion/react";
-import { projects } from "../data";
 import { ExternalLink, Github, ArrowLeft, CheckCircle2, LayoutTemplate } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useData } from "../context/DataContext";
 
 export function Portfolio() {
+  const { projects } = useData();
   return (
     <div className="pt-24 pb-20 px-6 min-h-screen bg-[#fafafa]">
       <div className="max-w-6xl mx-auto">
@@ -47,13 +48,13 @@ export function Portfolio() {
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
                   />
                   <div className="absolute bottom-6 left-6 right-6 z-20 translate-y-4 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-500 flex gap-3">
-                    {project.link && (
-                      <a href={project.link} className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-white text-gray-900 font-bold hover:bg-indigo-50 transition-colors">
+                    {project.link && project.link !== "#" && (
+                      <a href={project.link} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-white text-gray-900 font-bold hover:bg-indigo-50 transition-colors">
                         <ExternalLink className="w-4 h-4" /> 在线访问
                       </a>
                     )}
-                    {project.github && (
-                      <a href={project.github} className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gray-900 text-white font-bold hover:bg-gray-800 transition-colors">
+                    {project.github && project.github !== "#" && (
+                      <a href={project.github} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gray-900 text-white font-bold hover:bg-gray-800 transition-colors">
                         <Github className="w-4 h-4" /> 源代码
                       </a>
                     )}

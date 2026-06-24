@@ -1,11 +1,8 @@
 import express from "express";
 import path from "path";
-import { fileURLToPath } from "url";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import multer from "multer";
@@ -35,31 +32,7 @@ const upload = multer({ storage: storage });
 
 // Database Setup
 const sqlite = new Database(path.join(dataDir, "database.sqlite"));
-const db = drizzle(sqlite);
 
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey(),
-  email: text("email").notNull().unique(),
-  password: text("password").notNull(),
-});
-
-export const projects = sqliteTable("projects", {
-  id: integer("id").primaryKey(),
-  title: text("title").notNull(),
-  description: text("description"),
-  content: text("content"),
-  imageUrl: text("imageUrl"),
-});
-
-export const posts = sqliteTable("posts", {
-  id: integer("id").primaryKey(),
-  title: text("title").notNull(),
-  date: text("date"),
-  readTime: text("readTime"),
-  content: text("content"),
-});
-
-// Initialize DB tables manually to keep it simple without migrations
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,8 +43,12 @@ sqlite.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT,
-    content TEXT,
-    imageUrl TEXT
+    longDescription TEXT,
+    features TEXT,
+    tags TEXT,
+    imageUrl TEXT,
+    link TEXT,
+    github TEXT
   );
   CREATE TABLE IF NOT EXISTS posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,8 +59,19 @@ sqlite.exec(`
     content TEXT
   );
 `);
-// Add snippet column to existing posts tables that predate this schema
-try { sqlite.exec("ALTER TABLE posts ADD COLUMN snippet TEXT"); } catch {}
+
+// Migrations for existing databases
+const projectMigrations = [
+  "ALTER TABLE projects ADD COLUMN longDescription TEXT",
+  "ALTER TABLE projects ADD COLUMN features TEXT",
+  "ALTER TABLE projects ADD COLUMN tags TEXT",
+  "ALTER TABLE projects ADD COLUMN link TEXT",
+  "ALTER TABLE projects ADD COLUMN github TEXT",
+  "ALTER TABLE posts ADD COLUMN snippet TEXT",
+];
+for (const sql of projectMigrations) {
+  try { sqlite.exec(sql); } catch {}
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key_12345";
 
@@ -179,14 +167,18 @@ async function startServer() {
   });
 
   app.post("/api/projects", requireAuth, (req, res) => {
-    const { title, description, content, imageUrl } = req.body;
-    const info = sqlite.prepare("INSERT INTO projects (title, description, content, imageUrl) VALUES (?, ?, ?, ?)").run(title, description, content, imageUrl);
+    const { title, description, longDescription, features, tags, imageUrl, link, github } = req.body;
+    const info = sqlite.prepare(
+      "INSERT INTO projects (title, description, longDescription, features, tags, imageUrl, link, github) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(title, description, longDescription, features, tags, imageUrl, link, github);
     res.json({ id: info.lastInsertRowid });
   });
 
   app.put("/api/projects/:id", requireAuth, (req, res) => {
-    const { title, description, content, imageUrl } = req.body;
-    sqlite.prepare("UPDATE projects SET title=?, description=?, content=?, imageUrl=? WHERE id=?").run(title, description, content, imageUrl, req.params.id);
+    const { title, description, longDescription, features, tags, imageUrl, link, github } = req.body;
+    sqlite.prepare(
+      "UPDATE projects SET title=?, description=?, longDescription=?, features=?, tags=?, imageUrl=?, link=?, github=? WHERE id=?"
+    ).run(title, description, longDescription, features, tags, imageUrl, link, github, req.params.id);
     res.json({ ok: true });
   });
 

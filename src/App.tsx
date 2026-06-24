@@ -14,6 +14,7 @@ import { Footer } from "./components/Footer";
 import { Portfolio } from "./pages/Portfolio";
 import { BlogPage } from "./pages/BlogPage";
 import { AdminPage } from "./pages/AdminPage";
+import { DataProvider } from "./context/DataContext";
 
 function ScrollToHashElement() {
   const { hash, pathname } = useLocation();
@@ -46,6 +47,7 @@ function Home() {
 export default function App() {
   return (
     <BrowserRouter>
+      <DataProvider>
       <ScrollToHashElement />
       <div className="min-h-screen bg-[#fafafa] relative flex flex-col">
         <div className="absolute inset-0 bg-grid-pattern z-0 opacity-40 pointer-events-none" />
@@ -56,6 +58,7 @@ export default function App() {
           <Route path="/admin" element={<AdminPage />} />
         </Routes>
       </div>
+      </DataProvider>
     </BrowserRouter>
   );
 }
