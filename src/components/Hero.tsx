@@ -27,22 +27,22 @@ export function Hero() {
           </div>
 
           <h1 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-gray-900 leading-[1.1] mb-6">
-            专注于构建<br />
+            构建稳定可靠的<br />
             <span className="text-indigo-600">
-              稳定可靠的后端服务.
+              后端系统。
             </span>
           </h1>
 
           <p className="text-lg text-gray-600 font-medium leading-relaxed max-w-lg mb-10">
-            您好，我是 Jixu，一名后端开发工程师。我致力于编写整洁、可维护的代码，设计稳定的业务架构。同时，我也在探索将 AI 大模型与 Agent 技术融入后端生态，以实现开发提效与服务智能化。
+            后端工程师 Jixu，专注高并发服务与分布式架构，也在把 AI 与 Agent 带进后端工程。
           </p>
 
           <div className="flex flex-wrap items-center gap-4">
             <a href="#projects" className="inline-flex items-center justify-center gap-2 h-12 px-6 rounded-full bg-gray-900 text-white font-medium hover:bg-gray-800 active:scale-95 transition-all duration-300 shadow-sm">
-              查看项目经验 <ArrowRight className="w-4 h-4" />
+              查看作品 <ArrowRight className="w-4 h-4" />
             </a>
             <a href="#experience" className="inline-flex items-center justify-center gap-2 h-12 px-6 rounded-full bg-white border border-gray-200 text-gray-900 font-medium hover:bg-gray-50 active:scale-95 transition-all duration-300 shadow-sm hover:shadow">
-               个人经历
+               工作经历
             </a>
           </div>
         </motion.div>

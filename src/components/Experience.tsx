@@ -19,7 +19,7 @@ export function Experience() {
             实践历程
           </h2>
           <p className="text-gray-500 text-lg max-w-2xl mx-auto">
-            从校园走向职场的探索足迹，积累了不同体量业务的实战经验，持续在挑战中成长。
+            从初创到大厂，不同体量业务的一线实战。
           </p>
         </div>
 

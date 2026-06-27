@@ -17,10 +17,10 @@ export function Projects() {
               <span>Selected Works</span>
             </div>
             <h2 className="font-display text-3xl md:text-4xl font-bold tracking-tight text-gray-900 mb-3">
-              精选作品集
+              精选作品
             </h2>
             <p className="text-gray-600 font-medium max-w-xl text-base">
-              这些是我近期深度参与构建的业务项目与开源作品，涵盖了高并发后端架构与现代化的前端交互体验。
+              深度参与的核心系统与开源项目。
             </p>
           </div>
         </div>
