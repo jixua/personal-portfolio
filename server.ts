@@ -148,6 +148,20 @@ function seedExperiencesData() {
 }
 seedExperiencesData();
 
+// 预置唯一管理员账号，并清理其他历史账号（注册已关闭，仅此账号可登录）
+// 可通过环境变量 ADMIN_EMAIL / ADMIN_PASSWORD 覆盖默认值
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "jixu0090@gmail.com";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "jixu201421";
+function seedAdmin() {
+  sqlite.prepare("DELETE FROM users WHERE email != ?").run(ADMIN_EMAIL);
+  const existing = sqlite.prepare("SELECT id FROM users WHERE email = ?").get(ADMIN_EMAIL);
+  if (!existing) {
+    const hashed = bcrypt.hashSync(ADMIN_PASSWORD, 10);
+    sqlite.prepare("INSERT INTO users (email, password) VALUES (?, ?)").run(ADMIN_EMAIL, hashed);
+  }
+}
+seedAdmin();
+
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key_12345";
 
 function requireAuth(req: any, res: any, next: any) {
@@ -182,22 +196,9 @@ async function startServer() {
     res.json({ url: `/uploads/${req.file.filename}` });
   });
 
-  // Auth: Register
-  app.post("/api/auth/register", async (req, res) => {
-    const { email, password } = req.body;
-    try {
-      const existing = sqlite.prepare("SELECT * FROM users WHERE email = ?").get(email);
-      if (existing) {
-        return res.status(400).json({ error: "邮箱已存在" });
-      }
-      const hashed = await bcrypt.hash(password, 10);
-      const info = sqlite.prepare("INSERT INTO users (email, password) VALUES (?, ?)").run(email, hashed);
-      
-      const token = jwt.sign({ userId: info.lastInsertRowid }, JWT_SECRET, { expiresIn: "7d" });
-      res.json({ token });
-    } catch (error) {
-      res.status(500).json({ error: "Server error" });
-    }
+  // Auth: Register —— 已关闭，仅允许预置管理员登录
+  app.post("/api/auth/register", (req, res) => {
+    res.status(403).json({ error: "注册已关闭" });
   });
 
   // Auth: Login

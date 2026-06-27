@@ -97,7 +97,6 @@ export function AdminPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isRegistering, setIsRegistering] = useState(false);
   const [authError, setAuthError] = useState("");
 
   const fetchData = useCallback(async () => {
@@ -304,8 +303,7 @@ export function AdminPage() {
       e.preventDefault();
       setAuthError("");
       try {
-        const endpoint = isRegistering ? "/api/auth/register" : "/api/auth/login";
-        const res = await fetch(endpoint, {
+        const res = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password }),
@@ -329,7 +327,7 @@ export function AdminPage() {
             <LayoutDashboard className="w-8 h-8 text-indigo-600" />
             内容管理中心
           </div>
-          <p className="text-gray-500 text-center mb-8">{isRegistering ? "创建管理员账号" : "登录以管理您的作品集和博客"}</p>
+          <p className="text-gray-500 text-center mb-8">登录以管理您的作品集和博客</p>
           <form onSubmit={handleAuth} className="space-y-4">
             {authError && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl">{authError}</div>}
             <div>
@@ -341,15 +339,9 @@ export function AdminPage() {
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all" />
             </div>
             <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors">
-              {isRegistering ? "注册" : "登录"}
+              登录
             </button>
           </form>
-          <div className="mt-6 text-center text-sm text-gray-500">
-            {isRegistering ? "已有账号？" : "初次使用？"}
-            <button onClick={() => setIsRegistering(!isRegistering)} className="text-indigo-600 font-medium ml-1 hover:underline">
-              {isRegistering ? "去登录" : "创建账号"}
-            </button>
-          </div>
         </motion.div>
       </div>
     );
