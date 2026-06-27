@@ -27,14 +27,14 @@ export function Hero() {
           </div>
 
           <h1 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-gray-900 leading-[1.1] mb-6">
-            写好每一行<br />
+            于无声处，<br />
             <span className="text-indigo-600">
-              后端代码。
+              建一座城。
             </span>
           </h1>
 
           <p className="text-lg text-gray-600 font-medium leading-relaxed max-w-lg mb-10">
-            后端工程师 Jixu。专注把服务做稳、做好维护。也在探索 AI 与 Agent 的后端落地。
+            一个在代码里造世界的人。Jixu。
           </p>
 
           <div className="flex flex-wrap items-center gap-4">

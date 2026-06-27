@@ -20,7 +20,7 @@ export function Projects() {
               精选作品
             </h2>
             <p className="text-gray-600 font-medium max-w-xl text-base">
-              深度参与的核心系统与开源项目。
+              一些亲手搭起来的东西。
             </p>
           </div>
         </div>

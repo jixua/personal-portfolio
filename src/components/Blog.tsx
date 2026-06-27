@@ -18,7 +18,7 @@ export function Blog() {
             思考与见解
           </h2>
           <p className="text-gray-500 text-lg leading-relaxed mb-10 max-w-md">
-            踩坑、复盘与技术探索的记录。
+            写代码之余，也写一点想法。
           </p>
           <Link to="/blog" className="inline-flex items-center gap-2 px-6 py-4 rounded-full bg-gray-50 border border-gray-200 text-gray-900 font-bold hover:bg-gray-100 hover:border-gray-300 transition-all group">
             浏览全部分享 <ArrowRight className="w-5 h-5 text-gray-400 group-hover:text-gray-900 transform group-hover:translate-x-1 transition-all" />
