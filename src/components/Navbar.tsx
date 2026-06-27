@@ -6,7 +6,7 @@ export function Navbar() {
   const isHome = location.pathname === "/";
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
+    <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md border-b border-gray-100" style={{ background: "rgba(250,247,241,0.85)" }}>
       <div className="max-w-6xl mx-auto px-6 h-20 flex items-center justify-between">
         <Link to="/" className="font-display font-bold text-xl tracking-tighter text-black flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white bg-gradient-to-tr from-indigo-600 to-purple-500 shadow-lg shadow-indigo-500/20">

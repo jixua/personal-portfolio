@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { projects as staticProjects, blogPosts as staticPosts, knowledgeDocs as staticDocs, experiences as staticExperiences } from "../data";
 import type { Project, BlogPost, DocNode, Experience } from "../data";
 
 interface DataContextType {
@@ -12,10 +11,10 @@ interface DataContextType {
 }
 
 const DataContext = createContext<DataContextType>({
-  projects: staticProjects,
-  posts: staticPosts,
-  docs: staticDocs,
-  experiences: staticExperiences,
+  projects: [],
+  posts: [],
+  docs: [],
+  experiences: [],
   loading: false,
   refresh: () => {},
 });
@@ -58,10 +57,10 @@ function mapApiExperience(e: any): Experience {
 }
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [projects, setProjects] = useState<Project[]>(staticProjects);
-  const [posts, setPosts] = useState<BlogPost[]>(staticPosts);
-  const [docs, setDocs] = useState<DocNode[]>(staticDocs);
-  const [experiences, setExperiences] = useState<Experience[]>(staticExperiences);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [posts, setPosts] = useState<BlogPost[]>([]);
+  const [docs, setDocs] = useState<DocNode[]>([]);
+  const [experiences, setExperiences] = useState<Experience[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchAll = async () => {
@@ -78,11 +77,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         docsRes.ok ? docsRes.json() : [],
         expRes.ok ? expRes.json() : [],
       ]);
-      // 只有 API 有数据时才覆盖静态数据，保证初始展示不为空
-      if (apiProjects.length > 0) setProjects(apiProjects.map(mapApiProject));
-      if (apiPosts.length > 0) setPosts(apiPosts.map(mapApiPost));
-      if (apiDocs.length > 0) setDocs(apiDocs as DocNode[]);
-      if (apiExp.length > 0) setExperiences(apiExp.map(mapApiExperience));
+      setProjects(apiProjects.map(mapApiProject));
+      setPosts(apiPosts.map(mapApiPost));
+      setDocs(apiDocs as DocNode[]);
+      setExperiences(apiExp.map(mapApiExperience));
     } catch {
       // 网络错误时保留静态数据
     } finally {

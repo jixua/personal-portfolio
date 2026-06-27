@@ -11,6 +11,7 @@ import { Projects } from "./components/Projects";
 import { Experience } from "./components/Experience";
 import { Blog } from "./components/Blog";
 import { Footer } from "./components/Footer";
+import { SectionDivider } from "./components/SectionDivider";
 import { Portfolio } from "./pages/Portfolio";
 import { BlogPage } from "./pages/BlogPage";
 import { AdminPage } from "./pages/AdminPage";
@@ -37,8 +38,11 @@ function Home() {
   return (
     <>
       <Hero />
-      <Experience />
+      <SectionDivider />
       <Projects />
+      <SectionDivider />
+      <Experience />
+      <SectionDivider />
       <Blog />
     </>
   );
