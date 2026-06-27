@@ -8,3 +8,5 @@ coverage/
 !.env.example
 data/
 uploads/
+.idea/
+.claude/settings.local.json
