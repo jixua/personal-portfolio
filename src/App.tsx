@@ -13,6 +13,7 @@ import { Blog } from "./components/Blog";
 import { Footer } from "./components/Footer";
 import { SectionDivider } from "./components/SectionDivider";
 import { Portfolio } from "./pages/Portfolio";
+import { ProjectDetail } from "./pages/ProjectDetail";
 import { BlogPage } from "./pages/BlogPage";
 import { AdminPage } from "./pages/AdminPage";
 import { DataProvider } from "./context/DataContext";
@@ -58,6 +59,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<MainLayout><Home /></MainLayout>} />
           <Route path="/portfolio" element={<MainLayout><Portfolio /></MainLayout>} />
+          <Route path="/portfolio/:id" element={<MainLayout><ProjectDetail /></MainLayout>} />
           <Route path="/blog" element={<MainLayout><BlogPage /></MainLayout>} />
           <Route path="/admin" element={<AdminPage />} />
         </Routes>

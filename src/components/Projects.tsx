@@ -1,10 +1,9 @@
 import { motion } from "motion/react";
 import { Layers, ArrowUpRight } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useData } from "../context/DataContext";
 
 export function Projects() {
-  const navigate = useNavigate();
   const { projects } = useData();
 
   return (
@@ -27,53 +26,74 @@ export function Projects() {
 
         <div className="grid grid-cols-1 gap-6 text-left">
           {projects.slice(0, 2).map((project, idx) => (
-            <motion.div 
+            <motion.div
               key={project.id}
-              layoutId={`project-card-${project.id}`}
-              onClick={() => navigate(`/portfolio#project-${project.id}`)}
               initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-100px" }}
               transition={{ duration: 0.6, delay: idx * 0.15, ease: [0.22, 1, 0.36, 1] }}
-              className={`group flex flex-col md:flex-row ${idx % 2 === 1 ? 'md:flex-row-reverse' : ''} bg-white rounded-[2rem] p-2.5 border border-gray-100 shadow-xl shadow-gray-200/30 hover:shadow-2xl hover:shadow-indigo-500/10 hover:border-indigo-100 transition-all duration-500 cursor-pointer h-auto md:h-[280px] lg:h-[300px]`}
             >
-              <div className={`overflow-hidden relative rounded-[1.5rem] bg-gray-100 h-[220px] md:h-full md:w-[45%] shrink-0`}>
-                <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent z-10 transition-opacity duration-300 group-hover:opacity-0" />
-                <motion.img 
-                  layoutId={`project-image-${project.id}`}
-                  src={project.imageUrl} 
-                  alt={project.title} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
-                />
-                
-                {/* Floating Tags over image */}
-                <div className="absolute top-4 left-4 z-20 flex flex-wrap gap-2">
-                  {project.tags.slice(0, 2).map((tag, tIdx) => (
-                    <span key={tag} className={`px-3 py-1.5 text-xs font-bold rounded-full backdrop-blur-md shadow-sm border ${
-                      tIdx === 0 ? "bg-white/80 text-indigo-700 border-white/40" : "bg-black/50 text-white border-white/10"
-                    }`}>
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              
-              <div className={`p-5 md:p-8 flex-1 flex flex-col justify-center`}>
-                <motion.h3 layoutId={`project-title-${project.id}`} className="font-display font-bold text-xl md:text-2xl text-gray-900 mb-3 group-hover:text-indigo-600 transition-colors">
-                  {project.title}
-                </motion.h3>
-                <motion.p layoutId={`project-desc-${project.id}`} className="text-gray-500 text-sm md:text-base leading-relaxed mb-5 flex-1 line-clamp-3">
-                  {project.description}
-                </motion.p>
-                
-                <div className="flex items-center gap-4 mt-auto pt-5 border-t border-gray-100">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                    <ArrowUpRight className="w-4 h-4 group-hover:rotate-45 transition-transform" />
+              <Link
+                to={`/portfolio/${project.id}`}
+                className={`group flex flex-col md:flex-row ${idx % 2 === 1 ? 'md:flex-row-reverse' : ''} bg-white rounded-[2rem] p-2.5 border border-gray-100 shadow-xl shadow-gray-200/30 hover:shadow-2xl hover:shadow-indigo-500/10 hover:border-indigo-200 transition-all duration-500 cursor-pointer h-auto md:h-[280px] lg:h-[300px] no-underline`}
+                style={{ textDecoration: "none" }}
+              >
+                <div className="overflow-hidden relative rounded-[1.5rem] bg-gray-100 h-[220px] md:h-full md:w-[45%] shrink-0">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent z-10 transition-opacity duration-300 group-hover:opacity-0" />
+                  <img
+                    src={project.imageUrl}
+                    alt={project.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+                  />
+                  <div className="absolute top-4 left-4 z-20 flex flex-wrap gap-2">
+                    {project.tags.slice(0, 2).map((tag, tIdx) => (
+                      <span key={tag} className={`px-3 py-1.5 text-xs font-bold rounded-full backdrop-blur-md shadow-sm border ${
+                        tIdx === 0 ? "bg-white/80 text-indigo-700 border-white/40" : "bg-black/50 text-white border-white/10"
+                      }`}>
+                        {tag}
+                      </span>
+                    ))}
                   </div>
                 </div>
-              </div>
+
+                <div className="p-5 md:p-8 flex-1 flex flex-col justify-center">
+                  {project.num && (
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      PROJECT {project.num}
+                    </span>
+                  )}
+                  <h3 className="font-display font-bold text-xl md:text-2xl text-gray-900 mb-3 mt-1 group-hover:text-indigo-600 transition-colors">
+                    {project.title}
+                  </h3>
+                  <p className="text-gray-500 text-sm md:text-base leading-relaxed mb-5 flex-1 line-clamp-3">
+                    {project.description}
+                  </p>
+
+                  <div className="flex items-center gap-4 mt-auto pt-5 border-t border-gray-100">
+                    <div className="flex flex-wrap gap-1.5 flex-1">
+                      {project.tags.slice(0, 3).map(tag => (
+                        <span key={tag} className="px-2 py-0.5 text-xs font-semibold rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                    <span className="text-xs font-semibold text-indigo-600 whitespace-nowrap flex items-center gap-1">
+                      查看详情 <ArrowUpRight className="w-3.5 h-3.5" />
+                    </span>
+                  </div>
+                </div>
+              </Link>
             </motion.div>
           ))}
+        </div>
+
+        <div className="flex justify-center mt-8">
+          <Link
+            to="/portfolio"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white border border-gray-200 text-gray-700 font-semibold text-sm hover:border-indigo-200 hover:text-indigo-600 transition-all"
+          >
+            查看全部作品 <ArrowUpRight className="w-4 h-4" />
+          </Link>
         </div>
       </div>
     </section>

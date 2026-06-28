@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Link } from "react-router-dom";
 import {
   LayoutDashboard, FileText, BookOpen, Layers,
   Plus, Edit3, Trash2, ArrowLeft, Save, UploadCloud, X, LogOut, Loader2,
-  ChevronRight, ChevronDown, Folder, FolderPlus, FilePlus, Briefcase
+  ChevronRight, ChevronDown, Folder, FolderPlus, FilePlus, Briefcase, GripVertical
 } from "lucide-react";
 import type { DocNode } from "../data";
 
@@ -12,14 +12,27 @@ type AdminTab = "overview" | "projects" | "blog" | "docs" | "experience";
 
 interface ApiProject {
   id: number;
+  num: string | null;
   title: string;
+  subtitle: string | null;
   description: string | null;
   longDescription: string | null;
-  features: string | null; // JSON 数组字符串
-  tags: string | null; // JSON 数组字符串
+  overview: string | null;
+  category: string | null;
+  role: string | null;
+  period: string | null;
+  features: string | null; // JSON 数组字符串（对象数组）
+  tags: string | null;     // JSON 数组字符串
+  stack: string | null;    // JSON 数组字符串
   imageUrl: string | null;
   link: string | null;
   github: string | null;
+}
+
+interface FeatureRow {
+  title: string;
+  detail: string;
+  doc: string;
 }
 
 interface ApiPost {
@@ -84,9 +97,17 @@ export function AdminPage() {
   const [formDate, setFormDate] = useState("");
   const [formReadTime, setFormReadTime] = useState("");
   // 项目专属字段
+  const [formNum, setFormNum] = useState("");
+  const [formSubtitle, setFormSubtitle] = useState("");
+  const [formCategory, setFormCategory] = useState("");
+  const [formPeriod, setFormPeriod] = useState("");
+  const [formOverview, setFormOverview] = useState("");
   const [formLongDescription, setFormLongDescription] = useState("");
-  const [formFeatures, setFormFeatures] = useState(""); // 每行一个特性
+  const [formFeatureRows, setFormFeatureRows] = useState<FeatureRow[]>([]);
+  const dragIndexRef = useRef<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [formTags, setFormTags] = useState(""); // 逗号分隔
+  const [formStack, setFormStack] = useState(""); // 逗号分隔
   const [formLink, setFormLink] = useState("");
   const [formGithub, setFormGithub] = useState("");
   // 实践历程专属字段
@@ -148,9 +169,15 @@ export function AdminPage() {
     setFormImageUrl("");
     setFormDate("");
     setFormReadTime("");
+    setFormNum("");
+    setFormSubtitle("");
+    setFormCategory("");
+    setFormPeriod("");
+    setFormOverview("");
     setFormLongDescription("");
-    setFormFeatures("");
+    setFormFeatureRows([]);
     setFormTags("");
+    setFormStack("");
     setFormLink("");
     setFormGithub("");
     setFormRole("");
@@ -158,7 +185,6 @@ export function AdminPage() {
     setFormTechStack("");
 
     if (!editingContext.item) {
-      // 新建：仅博客需要默认日期/阅读时间
       if (editingContext.type === "blog") {
         setFormDate(new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" }));
         setFormReadTime("5 分钟阅读");
@@ -169,11 +195,29 @@ export function AdminPage() {
     const item = editingContext.item;
     if (editingContext.type === "project") {
       const p = item as ApiProject;
+      setFormNum(p.num ?? "");
       setFormTitle(p.title ?? "");
+      setFormSubtitle(p.subtitle ?? "");
+      setFormCategory(p.category ?? "");
       setFormDescription(p.description ?? "");
+      setFormPeriod(p.period ?? "");
+      setFormOverview(p.overview ?? "");
       setFormLongDescription(p.longDescription ?? "");
-      setFormFeatures(p.features ? safeParseArray(p.features).join("\n") : "");
+      // parse features — support both string[] and {title,detail,doc}[]
+      if (p.features) {
+        try {
+          const parsed = JSON.parse(p.features);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            if (typeof parsed[0] === "string") {
+              setFormFeatureRows(parsed.map((s: string) => ({ title: s, detail: "", doc: "#" })));
+            } else {
+              setFormFeatureRows(parsed.map((f: any) => ({ title: f.title ?? "", detail: f.detail ?? "", doc: f.doc ?? "#" })));
+            }
+          }
+        } catch {}
+      }
       setFormTags(p.tags ? safeParseArray(p.tags).join(", ") : "");
+      setFormStack(p.stack ? safeParseArray(p.stack).join(", ") : "");
       setFormImageUrl(p.imageUrl ?? "");
       setFormLink(p.link ?? "");
       setFormGithub(p.github ?? "");
@@ -208,14 +252,22 @@ export function AdminPage() {
     };
     try {
       if (editingContext.type === "project") {
-        const features = formFeatures.split("\n").map((s) => s.trim()).filter(Boolean);
         const tags = formTags.split(",").map((s) => s.trim()).filter(Boolean);
+        const stack = formStack.split(",").map((s) => s.trim()).filter(Boolean);
+        const features = formFeatureRows.filter((r) => r.title.trim());
         const body = {
+          num: formNum,
           title: formTitle,
+          subtitle: formSubtitle,
+          category: formCategory,
           description: formDescription,
           longDescription: formLongDescription,
+          overview: formOverview,
+          role: formRole,
+          period: formPeriod,
           features: JSON.stringify(features),
           tags: JSON.stringify(tags),
+          stack: JSON.stringify(stack),
           imageUrl: formImageUrl,
           link: formLink,
           github: formGithub,
@@ -269,8 +321,8 @@ export function AdminPage() {
     }
   };
 
-  const handleDelete = async (type: "project" | "blog" | "doc" | "experience", id: number | string, message = "确定要删除吗？") => {
-    if (!confirm(message)) return;
+  const handleDelete = async (type: "project" | "blog" | "doc" | "experience", id: number | string, message = "确定要删除吗？", skipConfirm = false) => {
+    if (!skipConfirm && !confirm(message)) return;
     const headers = { Authorization: `Bearer ${token}` };
     const baseMap = { project: "projects", doc: "docs", experience: "experiences", blog: "posts" } as const;
     await fetch(`/api/${baseMap[type]}/${id}`, { method: "DELETE", headers });
@@ -409,11 +461,7 @@ export function AdminPage() {
               onNewChild={(parentId, isFolder) => setEditingContext({ type: "doc", item: null, parentId, isFolder })}
               onEdit={(item) => setEditingContext({ type: "doc", item })}
               onDelete={(node) =>
-                handleDelete(
-                  "doc",
-                  node.id,
-                  node.isFolder ? `确定删除目录「${node.title}」及其下所有内容吗？` : `确定删除文档「${node.title}」吗？`
-                )
+                handleDelete("doc", node.id, "", true)
               }
             />
           )}
@@ -464,93 +512,34 @@ export function AdminPage() {
 
               <div className="flex-1 overflow-y-auto p-6 custom-scrollbar flex flex-col gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {editingContext.type === "experience" ? "公司 / 组织名称" : editingContext.type === "doc" && editingDocIsFolder ? "目录名称" : "标题"}
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    {editingContext.type === "experience" ? "公司 / 组织名称" : editingContext.type === "doc" && editingDocIsFolder ? "目录名称" : "项目标题"}
                   </label>
                   <input
                     type="text"
                     value={formTitle}
                     onChange={(e) => setFormTitle(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                    placeholder={editingContext.type === "experience" ? "如：字节跳动 (ByteDance)" : "输入标题..."}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-semibold"
+                    placeholder={
+                      editingContext.type === "experience" ? "如：字节跳动 (ByteDance)"
+                      : editingContext.type === "project" ? "如：企业级 SaaS 平台后台系统"
+                      : "输入标题..."
+                    }
                   />
                 </div>
 
                 {editingContext.type === "project" ? (
                   <>
+                    {/* ── 封面图片（最顶部，视觉优先） ── */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">简介（卡片摘要）</label>
-                      <textarea
-                        value={formDescription}
-                        onChange={(e) => setFormDescription(e.target.value)}
-                        rows={2}
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
-                        placeholder="一句话简介，显示在作品集卡片..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">详细描述</label>
-                      <textarea
-                        value={formLongDescription}
-                        onChange={(e) => setFormLongDescription(e.target.value)}
-                        rows={4}
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
-                        placeholder="项目详情页展示的完整介绍..."
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">技术标签（逗号分隔）</label>
-                        <input
-                          type="text"
-                          value={formTags}
-                          onChange={(e) => setFormTags(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                          placeholder="Node.js, Redis, PostgreSQL"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">核心特性（每行一个）</label>
-                        <textarea
-                          value={formFeatures}
-                          onChange={(e) => setFormFeatures(e.target.value)}
-                          rows={1}
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-y min-h-[48px]"
-                          placeholder="多租户隔离&#10;RBAC 权限校验"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">在线访问链接（可选）</label>
-                        <input
-                          type="text"
-                          value={formLink}
-                          onChange={(e) => setFormLink(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                          placeholder="https://..."
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">源码链接（可选）</label>
-                        <input
-                          type="text"
-                          value={formGithub}
-                          onChange={(e) => setFormGithub(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                          placeholder="https://github.com/..."
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">封面图片</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">封面图片</label>
                       <div className="flex gap-3 items-start">
                         <input
                           type="text"
                           value={formImageUrl}
                           onChange={(e) => setFormImageUrl(e.target.value)}
-                          className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                          placeholder="图片 URL 或上传..."
+                          className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                          placeholder="图片 URL 或点击上传..."
                         />
                         <label className="h-12 px-4 border-2 border-dashed border-gray-200 rounded-xl flex items-center gap-2 text-gray-400 hover:text-indigo-500 hover:border-indigo-500 hover:bg-indigo-50/50 transition-all cursor-pointer shrink-0">
                           <input
@@ -560,15 +549,13 @@ export function AdminPage() {
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const formData = new FormData();
-                                formData.append("file", file);
+                                const fd = new FormData();
+                                fd.append("file", file);
                                 try {
-                                  const res = await fetch("/api/upload", { method: "POST", body: formData });
+                                  const res = await fetch("/api/upload", { method: "POST", body: fd });
                                   const data = await res.json();
                                   if (data.url) setFormImageUrl(data.url);
-                                } catch {
-                                  alert("上传失败");
-                                }
+                                } catch { alert("上传失败"); }
                               }
                             }}
                           />
@@ -577,10 +564,271 @@ export function AdminPage() {
                         </label>
                       </div>
                       {formImageUrl && (
-                        <div className="mt-3 h-32 rounded-xl overflow-hidden border border-gray-100 bg-gray-50">
+                        <div className="mt-3 h-36 rounded-2xl overflow-hidden border border-gray-100 bg-gray-50">
                           <img src={formImageUrl} className="w-full h-full object-cover" alt="预览" />
                         </div>
                       )}
+                    </div>
+
+                    {/* ── 基础信息 ── */}
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">编号</label>
+                        <input
+                          type="text"
+                          value={formNum}
+                          onChange={(e) => setFormNum(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm font-mono"
+                          placeholder="01"
+                          maxLength={4}
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">分类</label>
+                        <select
+                          value={formCategory}
+                          onChange={(e) => setFormCategory(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm bg-white"
+                        >
+                          <option value="">-- 选择分类 --</option>
+                          <option value="Backend">Backend</option>
+                          <option value="Full Stack">Full Stack</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">副标题</label>
+                      <input
+                        type="text"
+                        value={formSubtitle}
+                        onChange={(e) => setFormSubtitle(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                        placeholder="如：高可用多租户业务管理中台"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">卡片简介</label>
+                      <textarea
+                        value={formDescription}
+                        onChange={(e) => setFormDescription(e.target.value)}
+                        rows={2}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none text-sm"
+                        placeholder="一句话简介，显示在作品集卡片上..."
+                      />
+                    </div>
+
+                    {/* ── 详情页元数据 ── */}
+                    <div className="border-t border-gray-100 pt-5">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">详情页元数据</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">角色</label>
+                          <input
+                            type="text"
+                            value={formRole}
+                            onChange={(e) => setFormRole(e.target.value)}
+                            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                            placeholder="如：后端架构师"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">项目周期</label>
+                          <input
+                            type="text"
+                            value={formPeriod}
+                            onChange={(e) => setFormPeriod(e.target.value)}
+                            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm font-mono"
+                            placeholder="2025.03 — 2025.08"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ── 项目概述 ── */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">项目概述</label>
+                      <p className="text-xs text-gray-400 mb-2">对应详情页「项目概述」模块，支持空行分段</p>
+                      <textarea
+                        value={formOverview}
+                        onChange={(e) => setFormOverview(e.target.value)}
+                        rows={5}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-y text-sm"
+                        placeholder="详细的项目背景、技术决策和结果..."
+                      />
+                    </div>
+
+                    {/* ── 核心功能 ── */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">核心功能</label>
+                          <p className="text-xs text-gray-400 mt-0.5">对应详情页「核心功能」列表，每条含标题、说明和文档链接</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFormFeatureRows((rows) => [...rows, { title: "", detail: "", doc: "#" }])}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors text-xs font-bold"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> 添加功能点
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {formFeatureRows.length === 0 && (
+                          <div className="py-6 text-center text-gray-300 text-sm border-2 border-dashed border-gray-100 rounded-xl">
+                            点击「添加功能点」开始填写
+                          </div>
+                        )}
+                        {formFeatureRows.map((row, idx) => (
+                          <div
+                            key={idx}
+                            draggable
+                            onDragStart={() => { dragIndexRef.current = idx; }}
+                            onDragOver={(e) => { e.preventDefault(); setDragOverIndex(idx); }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              const from = dragIndexRef.current;
+                              if (from === null || from === idx) return;
+                              setFormFeatureRows((rows) => {
+                                const next = [...rows];
+                                const [moved] = next.splice(from, 1);
+                                next.splice(idx, 0, moved);
+                                return next;
+                              });
+                              dragIndexRef.current = null;
+                              setDragOverIndex(null);
+                            }}
+                            onDragEnd={() => { dragIndexRef.current = null; setDragOverIndex(null); }}
+                            style={{
+                              opacity: dragIndexRef.current === idx ? 0.4 : 1,
+                              borderColor: dragOverIndex === idx && dragIndexRef.current !== idx ? "#818cf8" : undefined,
+                            }}
+                            className="flex gap-2 items-start bg-gray-50 rounded-xl p-3 border border-gray-100 transition-colors"
+                          >
+                            {/* drag handle */}
+                            <div
+                              className="mt-2.5 shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-400 transition-colors"
+                              title="拖动排序"
+                            >
+                              <GripVertical className="w-4 h-4" />
+                            </div>
+
+                            <div className="flex-1 grid grid-cols-1 gap-2">
+                              {/* title */}
+                              <input
+                                type="text"
+                                value={row.title}
+                                onChange={(e) => {
+                                  const next = [...formFeatureRows];
+                                  next[idx] = { ...next[idx], title: e.target.value };
+                                  setFormFeatureRows(next);
+                                }}
+                                className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm font-medium"
+                                placeholder="功能标题，如：多租户数据隔离设计"
+                              />
+                              {/* detail */}
+                              <input
+                                type="text"
+                                value={row.detail}
+                                onChange={(e) => {
+                                  const next = [...formFeatureRows];
+                                  next[idx] = { ...next[idx], detail: e.target.value };
+                                  setFormFeatureRows(next);
+                                }}
+                                className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm text-gray-500"
+                                placeholder="一行说明，如：基于 Schema 隔离，防止越权访问"
+                              />
+                              {/* feature doc link — optional */}
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-semibold text-gray-300 whitespace-nowrap shrink-0">
+                                  文档↗
+                                </span>
+                                <div className="relative flex-1">
+                                  <input
+                                    type="text"
+                                    value={row.doc === "#" ? "" : row.doc}
+                                    onChange={(e) => {
+                                      const next = [...formFeatureRows];
+                                      next[idx] = { ...next[idx], doc: e.target.value || "#" };
+                                      setFormFeatureRows(next);
+                                    }}
+                                    className="w-full px-3 py-2 pr-14 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-xs font-mono text-gray-400"
+                                    placeholder="该功能点的实现文档链接（可选）"
+                                  />
+                                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-gray-300 pointer-events-none">
+                                    可选
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setFormFeatureRows((rows) => rows.filter((_, i) => i !== idx))}
+                              className="p-1.5 text-gray-300 hover:text-red-400 hover:bg-red-50 rounded-lg transition-colors mt-1 shrink-0"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* ── 标签与技术栈 ── */}
+                    <div className="border-t border-gray-100 pt-5">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">标签与技术栈</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">图片标签（逗号分隔）</label>
+                          <p className="text-xs text-gray-400 mb-1.5">显示在卡片图片上，建议 3 个以内</p>
+                          <input
+                            type="text"
+                            value={formTags}
+                            onChange={(e) => setFormTags(e.target.value)}
+                            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                            placeholder="Node.js, Redis, PostgreSQL"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">技术栈（逗号分隔）</label>
+                          <p className="text-xs text-gray-400 mb-1.5">显示在详情页元数据栏</p>
+                          <input
+                            type="text"
+                            value={formStack}
+                            onChange={(e) => setFormStack(e.target.value)}
+                            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                            placeholder="Node.js, Express, PostgreSQL, Redis, Docker"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ── 外部链接 ── */}
+                    <div className="border-t border-gray-100 pt-5">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">外部链接（可选）</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">在线访问</label>
+                          <input
+                            type="text"
+                            value={formLink}
+                            onChange={(e) => setFormLink(e.target.value)}
+                            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                            placeholder="https://..."
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">源码仓库</label>
+                          <input
+                            type="text"
+                            value={formGithub}
+                            onChange={(e) => setFormGithub(e.target.value)}
+                            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                            placeholder="https://github.com/..."
+                          />
+                        </div>
+                      </div>
                     </div>
                   </>
                 ) : editingContext.type === "blog" ? (
@@ -774,25 +1022,44 @@ function ProjectsManager({
           <p>暂无项目，点击右上角新增</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {projects.map((p) => (
-            <div key={p.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-4">
-              {p.imageUrl && (
-                <div className="h-40 rounded-xl bg-gray-100 overflow-hidden">
+            <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+              <div className="relative h-40 bg-gray-100 shrink-0">
+                {p.imageUrl ? (
                   <img src={p.imageUrl} className="w-full h-full object-cover" alt="" />
-                </div>
-              )}
-              <div>
-                <h3 className="font-bold text-lg text-gray-900">{p.title}</h3>
-                {p.description && <p className="text-gray-500 text-sm mt-1 line-clamp-2">{p.description}</p>}
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Layers className="w-8 h-8 text-gray-200" />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+                {p.num && (
+                  <span className="absolute top-3 right-3 font-mono text-xs font-bold text-white/80 bg-black/30 backdrop-blur-sm px-2 py-0.5 rounded-full">
+                    {p.num}
+                  </span>
+                )}
+                {p.category && (
+                  <span className="absolute bottom-3 left-3 text-xs font-semibold text-white bg-black/40 backdrop-blur-sm px-2.5 py-1 rounded-full">
+                    {p.category}
+                  </span>
+                )}
               </div>
-              <div className="flex items-center gap-2 mt-auto pt-4 border-t border-gray-50">
-                <button onClick={() => onEdit(p)} className="flex-1 flex items-center justify-center gap-2 py-2 bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium rounded-lg transition-colors text-sm">
-                  <Edit3 className="w-4 h-4" /> 编辑
-                </button>
-                <button onClick={() => onDelete(p.id)} className="flex items-center justify-center p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
+              <div className="p-4 flex flex-col gap-2 flex-1">
+                <div>
+                  <h3 className="font-bold text-base text-gray-900 leading-snug">{p.title}</h3>
+                  {p.subtitle && <p className="text-indigo-500 text-xs font-medium mt-0.5">{p.subtitle}</p>}
+                  {p.period && <p className="text-gray-400 text-xs font-mono mt-0.5">{p.period}</p>}
+                  {p.description && <p className="text-gray-500 text-sm mt-2 line-clamp-2">{p.description}</p>}
+                </div>
+                <div className="flex items-center gap-2 mt-auto pt-3 border-t border-gray-50">
+                  <button onClick={() => onEdit(p)} className="flex-1 flex items-center justify-center gap-2 py-2 bg-gray-50 hover:bg-indigo-50 hover:text-indigo-600 text-gray-700 font-medium rounded-lg transition-colors text-sm">
+                    <Edit3 className="w-4 h-4" /> 编辑
+                  </button>
+                  <button onClick={() => onDelete(p.id)} className="flex items-center justify-center p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -986,6 +1253,7 @@ function DocTreeNode({
   onDelete: (node: DocNode) => void;
 }) {
   const [open, setOpen] = useState(level === 0);
+  const [confirming, setConfirming] = useState(false);
 
   return (
     <div>
@@ -1007,24 +1275,42 @@ function DocTreeNode({
         )}
 
         {/* 操作按钮（hover 显示） */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          {node.isFolder && (
-            <>
-              <button onClick={() => onNewChild(node.id, true)} title="新建子目录" className="p-1.5 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-md transition-colors">
-                <FolderPlus className="w-4 h-4" />
-              </button>
-              <button onClick={() => onNewChild(node.id, false)} title="新建子文档" className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
-                <FilePlus className="w-4 h-4" />
-              </button>
-            </>
-          )}
-          <button onClick={() => onEdit(node)} title={node.isFolder ? "重命名" : "编辑"} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors">
-            <Edit3 className="w-4 h-4" />
-          </button>
-          <button onClick={() => onDelete(node)} title="删除" className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors">
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
+        {confirming ? (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-xs text-gray-500">确认删除?</span>
+            <button
+              onClick={() => { setConfirming(false); onDelete(node); }}
+              className="px-2 py-0.5 text-xs font-semibold bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors"
+            >
+              删除
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="px-2 py-0.5 text-xs font-semibold bg-gray-100 text-gray-600 rounded-md hover:bg-gray-200 transition-colors"
+            >
+              取消
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+            {node.isFolder && (
+              <>
+                <button onClick={() => onNewChild(node.id, true)} title="新建子目录" className="p-1.5 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-md transition-colors">
+                  <FolderPlus className="w-4 h-4" />
+                </button>
+                <button onClick={() => onNewChild(node.id, false)} title="新建子文档" className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
+                  <FilePlus className="w-4 h-4" />
+                </button>
+              </>
+            )}
+            <button onClick={() => onEdit(node)} title={node.isFolder ? "重命名" : "编辑"} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors">
+              <Edit3 className="w-4 h-4" />
+            </button>
+            <button onClick={() => setConfirming(true)} title="删除" className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {node.isFolder && open && node.children && node.children.length > 0 && (

@@ -22,11 +22,18 @@ const DataContext = createContext<DataContextType>({
 function mapApiProject(p: any): Project {
   return {
     id: String(p.id),
+    num: p.num ?? undefined,
     title: p.title ?? "",
+    subtitle: p.subtitle ?? undefined,
     description: p.description ?? "",
     longDescription: p.longDescription ?? undefined,
+    overview: p.overview ?? undefined,
+    category: p.category ?? undefined,
+    role: p.role ?? undefined,
+    period: p.period ?? undefined,
     features: p.features ? JSON.parse(p.features) : undefined,
     tags: p.tags ? JSON.parse(p.tags) : [],
+    stack: p.stack ? JSON.parse(p.stack) : undefined,
     imageUrl: p.imageUrl ?? "",
     link: p.link || undefined,
     github: p.github || undefined,

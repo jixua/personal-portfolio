@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import multer from "multer";
-import { knowledgeDocs, experiences as seedExperiences } from "./src/data";
+import { knowledgeDocs, experiences as seedExperiences, projects as seedProjects } from "./src/data";
 
 // Create /data dir if it doesn't exist
 const dataDir = path.join(process.cwd(), "data");
@@ -85,6 +85,13 @@ const projectMigrations = [
   "ALTER TABLE projects ADD COLUMN link TEXT",
   "ALTER TABLE projects ADD COLUMN github TEXT",
   "ALTER TABLE posts ADD COLUMN snippet TEXT",
+  "ALTER TABLE projects ADD COLUMN num TEXT",
+  "ALTER TABLE projects ADD COLUMN subtitle TEXT",
+  "ALTER TABLE projects ADD COLUMN category TEXT",
+  "ALTER TABLE projects ADD COLUMN role TEXT",
+  "ALTER TABLE projects ADD COLUMN period TEXT",
+  "ALTER TABLE projects ADD COLUMN overview TEXT",
+  "ALTER TABLE projects ADD COLUMN stack TEXT",
 ];
 for (const sql of projectMigrations) {
   try { sqlite.exec(sql); } catch {}
@@ -148,6 +155,30 @@ function seedExperiencesData() {
 }
 seedExperiencesData();
 
+// 首次启动时，把 data.ts 中的静态项目数据种入 projects 表
+function seedProjectsData() {
+  const row = sqlite.prepare("SELECT COUNT(*) AS c FROM projects").get() as { c: number };
+  if (row.c > 0) return;
+  const insert = sqlite.prepare(
+    "INSERT INTO projects (num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  const tx = sqlite.transaction(() => {
+    for (const p of seedProjects) {
+      insert.run(
+        p.num ?? null, p.title, p.subtitle ?? null, p.description,
+        p.longDescription ?? null, p.overview ?? null,
+        p.category ?? null, p.role ?? null, p.period ?? null,
+        JSON.stringify(p.features ?? []),
+        JSON.stringify(p.tags),
+        JSON.stringify(p.stack ?? []),
+        p.imageUrl, p.link ?? null, p.github ?? null,
+      );
+    }
+  });
+  tx();
+}
+seedProjectsData();
+
 // 预置唯一管理员账号，并清理其他历史账号（注册已关闭，仅此账号可登录）
 // 可通过环境变量 ADMIN_EMAIL / ADMIN_PASSWORD 覆盖默认值
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "jixu0090@gmail.com";
@@ -179,7 +210,7 @@ function requireAuth(req: any, res: any, next: any) {
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = Number(process.env.PORT) || 3001;
 
   app.use(express.json());
 
@@ -242,19 +273,25 @@ async function startServer() {
     res.json(list);
   });
 
+  app.get("/api/projects/:id", (req, res) => {
+    const project = sqlite.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id);
+    if (!project) return res.status(404).json({ error: "Not found" });
+    res.json(project);
+  });
+
   app.post("/api/projects", requireAuth, (req, res) => {
-    const { title, description, longDescription, features, tags, imageUrl, link, github } = req.body;
+    const { num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github } = req.body;
     const info = sqlite.prepare(
-      "INSERT INTO projects (title, description, longDescription, features, tags, imageUrl, link, github) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(title, description, longDescription, features, tags, imageUrl, link, github);
+      "INSERT INTO projects (num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github);
     res.json({ id: info.lastInsertRowid });
   });
 
   app.put("/api/projects/:id", requireAuth, (req, res) => {
-    const { title, description, longDescription, features, tags, imageUrl, link, github } = req.body;
+    const { num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github } = req.body;
     sqlite.prepare(
-      "UPDATE projects SET title=?, description=?, longDescription=?, features=?, tags=?, imageUrl=?, link=?, github=? WHERE id=?"
-    ).run(title, description, longDescription, features, tags, imageUrl, link, github, req.params.id);
+      "UPDATE projects SET num=?, title=?, subtitle=?, description=?, longDescription=?, overview=?, category=?, role=?, period=?, features=?, tags=?, stack=?, imageUrl=?, link=?, github=? WHERE id=?"
+    ).run(num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github, req.params.id);
     res.json({ ok: true });
   });
 

@@ -1,10 +1,23 @@
+export interface ProjectFeature {
+  title: string;
+  detail: string;
+  doc: string;
+}
+
 export interface Project {
   id: string;
+  num?: string;
   title: string;
+  subtitle?: string;
   description: string;
   longDescription?: string;
-  features?: string[];
+  overview?: string;
+  category?: "Backend" | "Full Stack";
+  role?: string;
+  period?: string;
+  features?: ProjectFeature[] | string[];
   tags: string[];
+  stack?: string[];
   imageUrl: string;
   link?: string;
   github?: string;
@@ -88,32 +101,68 @@ export const skills = {
 export const projects: Project[] = [
   {
     id: "1",
+    num: "01",
     title: "企业级 SaaS 平台后台系统",
+    subtitle: "高可用多租户业务管理中台",
     description: "为中小企业提供的一站式业务管理平台后端。采用 Node.js 开发，设计合理的模块化架构与数据模型，确保业务数据的完整性与接口的高可用。",
     longDescription: "该系统的核心模块涵盖了用户权限系统 (RBAC)，租户管理、业务核心数据流转以及自动化工作流引擎。在此项目中我主导了微服务架构向单体模块化架构的过渡方案（为了适应当前的业务规模和研发成本），并通过 PostgreSQL 处理复杂的关联查询和数据报表。系统具备优秀的延展性和稳定性。",
-    features: ["多租户数据隔离设计", "基于 RBAC 的动态权限校验", "高频查询接口 Redis 缓存优化", "完善的日志与错误追踪体系"],
+    overview: "该系统的核心模块涵盖了用户权限系统 (RBAC)、租户管理、业务核心数据流转以及自动化工作流引擎。\n\n在此项目中我主导了微服务架构向单体模块化架构的过渡方案（为了适应当前的业务规模和研发成本），并通过 PostgreSQL 处理复杂的关联查询和数据报表。\n\n系统在高并发场景下表现稳定，P99 响应时间控制在 80ms 以内，月活用户突破 3 万，系统可用性维持在 99.95% 以上。",
+    category: "Backend",
+    role: "后端架构师",
+    period: "2025.03 — 2025.08",
+    features: [
+      { title: "多租户数据隔离设计", detail: "基于 Schema 隔离策略，确保租户间数据严格隔离，防止越权访问", doc: "#" },
+      { title: "基于 RBAC 的动态权限校验", detail: "支持角色、资源、操作三维权限矩阵，动态下发权限变更无需重启", doc: "#" },
+      { title: "高频查询接口 Redis 缓存优化", detail: "热点数据本地缓存 + 分布式 Redis 二级缓存，接口吞吐量提升 5 倍", doc: "#" },
+      { title: "完善的日志与错误追踪体系", detail: "集成 OpenTelemetry 实现全链路追踪，错误告警 P0 响应时间 < 3 分钟", doc: "#" },
+    ],
     tags: ["Node.js", "Express", "PostgreSQL", "Redis"],
+    stack: ["Node.js", "Express", "PostgreSQL", "Redis", "TypeScript", "Docker", "Nginx"],
     imageUrl: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=2000",
     link: "#",
     github: "#",
   },
   {
     id: "2",
+    num: "02",
     title: "日志分析与告警平台",
+    subtitle: "千万级日志实时分析与智能告警",
     description: "基于 Elastic 生态构建的内部日志收集与分析系统。通过优化查询与索引策略，提升了团队排查线上问题的效率。",
     longDescription: "面对公司日益增长的服务端日志，原有的查询体验变得极其缓慢。该项目着眼于对日志的生命周期管理，利用 Logstash 结合自定义 Parse 脚本进行日志的清洗、标准化后再入库 ElasticSearch。同时开发了基于 Node.js 的规则告警服务，能够通过 Webhook 即时推送到企业通讯软件。",
-    features: ["千万级别日志数据秒级查询", "告警规则动态配置与下发", "日志生命周期自动化滚动清理", "数据可视化仪表盘集成"],
+    overview: "面对公司日益增长的服务端日志，原有的查询体验变得极其缓慢。该项目着眼于对日志的生命周期管理，利用 Logstash 结合自定义 Parse 脚本进行日志的清洗、标准化后再入库 ElasticSearch。\n\n同时开发了基于 Node.js 的规则告警服务，能够通过 Webhook 即时推送到企业通讯软件。告警规则支持动态配置，运营人员可通过可视化界面配置告警阈值与推送渠道，无需工程师介入。\n\n日均处理日志量峰值达 2.3 亿条，P95 查询响应时间压缩至 120ms 以内。",
+    category: "Full Stack",
+    role: "全栈开发",
+    period: "2024.11 — 2025.02",
+    features: [
+      { title: "千万级别日志数据秒级查询", detail: "结合 ES 索引分片与冷热数据分层，实现日均 2 亿+条日志的毫秒级检索", doc: "#" },
+      { title: "告警规则动态配置与下发", detail: "可视化告警规则编辑器，支持阈值、频率、静默窗口等多维配置，秒级生效", doc: "#" },
+      { title: "日志生命周期自动化滚动清理", detail: "基于 ILM 策略自动归档 + 清理，存储成本降低 40%，无需人工介入", doc: "#" },
+      { title: "数据可视化仪表盘集成", detail: "集成 Kibana 并定制看板，关键业务指标一览无余，支持自定义时间范围钻取", doc: "#" },
+    ],
     tags: ["Node.js", "ElasticSearch", "React", "Koa"],
+    stack: ["Node.js", "Koa", "ElasticSearch", "Logstash", "Kibana", "React", "TypeScript"],
     imageUrl: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&q=80&w=2000",
     link: "#",
   },
   {
     id: "3",
+    num: "03",
     title: "内部支付对账网关引擎",
+    subtitle: "多渠道支付清算与幂等对账中台",
     description: "抽象出聚合支付的底层引擎，解决多渠道资金清算与对账难题。利用简单的状态机模式与事务机制，保证系统数据的一致性。",
     longDescription: "作为所有 C 端电商与虚拟商品支付的防线，支付网关的作用不仅仅是转发请求，更要解决掉单、重复支付及多渠道定时对账对平的痛点。该引擎引入了严谨的有限状态机 (FSM) ，利用 RabbitMQ 实现异步的支付状态轮询和对账单拉取，确保了订单与资金的一致性。",
-    features: ["标准聚合支付 API 与 SDK 设计", "分布式环境下的幂等性保证", "有限状态机引擎 (FSM)", "长连接异步支付结果推送"],
+    overview: "作为所有 C 端电商与虚拟商品支付的防线，支付网关的作用不仅仅是转发请求，更要解决掉单、重复支付及多渠道定时对账对平的痛点。\n\n该引擎引入了严谨的有限状态机 (FSM)，利用 RabbitMQ 实现异步的支付状态轮询和对账单拉取，确保了订单与资金的一致性。所有关键操作均通过 MySQL 事务 + 唯一索引保证幂等性，对账差异自动触发人工审核工作流。\n\n系统上线后，资金对账准确率达到 99.998%，支付成功率提升至 99.6%，月均处理交易额突破 2000 万。",
+    category: "Backend",
+    role: "后端研发",
+    period: "2024.06 — 2024.10",
+    features: [
+      { title: "标准聚合支付 API 与 SDK 设计", detail: "统一封装微信、支付宝等多渠道，上层业务无感知切换，接入成本降低 70%", doc: "#" },
+      { title: "分布式环境下的幂等性保证", detail: "基于 MySQL 唯一约束 + Redis 分布式锁双重防护，彻底杜绝重复扣款", doc: "#" },
+      { title: "有限状态机引擎 (FSM)", detail: "订单状态流转严格遵循 FSM，每次跃迁均有事件溯源日志，异常可回溯", doc: "#" },
+      { title: "长连接异步支付结果推送", detail: "基于 WebSocket + 消息队列实现毫秒级支付结果推送，告别轮询方案", doc: "#" },
+    ],
     tags: ["Java", "Spring Boot", "MySQL", "RabbitMQ"],
+    stack: ["Java", "Spring Boot", "MySQL", "RabbitMQ", "Redis", "WebSocket"],
     imageUrl: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&q=80&w=2000",
     github: "#",
   },
