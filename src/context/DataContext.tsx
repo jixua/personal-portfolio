@@ -19,9 +19,21 @@ const DataContext = createContext<DataContextType>({
   refresh: () => {},
 });
 
+function parseArray(value: unknown): any[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string" || value.trim() === "") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function mapApiProject(p: any): Project {
   return {
     id: String(p.id),
+    sortOrder: p.sortOrder ?? undefined,
     num: p.num ?? undefined,
     title: p.title ?? "",
     subtitle: p.subtitle ?? undefined,
@@ -31,9 +43,9 @@ function mapApiProject(p: any): Project {
     category: p.category ?? undefined,
     role: p.role ?? undefined,
     period: p.period ?? undefined,
-    features: p.features ? JSON.parse(p.features) : undefined,
-    tags: p.tags ? JSON.parse(p.tags) : [],
-    stack: p.stack ? JSON.parse(p.stack) : undefined,
+    features: parseArray(p.features),
+    tags: parseArray(p.tags),
+    stack: parseArray(p.stack),
     imageUrl: p.imageUrl ?? "",
     link: p.link || undefined,
     github: p.github || undefined,
@@ -43,6 +55,7 @@ function mapApiProject(p: any): Project {
 function mapApiPost(p: any): BlogPost {
   return {
     id: String(p.id),
+    sortOrder: p.sortOrder ?? undefined,
     title: p.title ?? "",
     snippet: p.snippet ?? "",
     content: p.content ?? undefined,
@@ -58,8 +71,8 @@ function mapApiExperience(e: any): Experience {
     role: e.role ?? "",
     date: e.date ?? "",
     description: e.description ?? "",
-    achievements: e.achievements ? JSON.parse(e.achievements) : [],
-    techStack: e.techStack ? JSON.parse(e.techStack) : [],
+    achievements: parseArray(e.achievements),
+    techStack: parseArray(e.techStack),
   };
 }
 
@@ -71,6 +84,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchAll = async () => {
+    setLoading(true);
     try {
       const [projRes, postsRes, docsRes, expRes] = await Promise.all([
         fetch("/api/projects"),
@@ -88,8 +102,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setPosts(apiPosts.map(mapApiPost));
       setDocs(apiDocs as DocNode[]);
       setExperiences(apiExp.map(mapApiExperience));
-    } catch {
-      // 网络错误时保留静态数据
+    } catch (error) {
+      console.error("Failed to load database content", error);
     } finally {
       setLoading(false);
     }

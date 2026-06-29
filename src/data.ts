@@ -6,6 +6,7 @@ export interface ProjectFeature {
 
 export interface Project {
   id: string;
+  sortOrder?: number;
   num?: string;
   title: string;
   subtitle?: string;
@@ -25,6 +26,7 @@ export interface Project {
 
 export interface BlogPost {
   id: string;
+  sortOrder?: number;
   title: string;
   snippet: string;
   content?: string;
@@ -34,6 +36,7 @@ export interface BlogPost {
 
 export interface DocNode {
   id: string;
+  sortOrder?: number;
   title: string;
   isFolder?: boolean;
   children?: DocNode[];

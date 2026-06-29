@@ -1,17 +1,21 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Link } from "react-router-dom";
 import {
   LayoutDashboard, FileText, BookOpen, Layers,
   Plus, Edit3, Trash2, ArrowLeft, Save, UploadCloud, X, LogOut, Loader2,
-  ChevronRight, ChevronDown, Folder, FolderPlus, FilePlus, Briefcase, GripVertical
+  ChevronRight, ChevronDown, Folder, FolderPlus, FilePlus, Briefcase, GripVertical,
+  Search, PanelLeftClose
 } from "lucide-react";
 import type { DocNode } from "../data";
+import { useData } from "../context/DataContext";
+import { extractMarkdownHeadings, slugifyMarkdownHeading } from "../lib/markdown";
 
 type AdminTab = "overview" | "projects" | "blog" | "docs" | "experience";
 
 interface ApiProject {
   id: number;
+  sortOrder: number | null;
   num: string | null;
   title: string;
   subtitle: string | null;
@@ -37,6 +41,7 @@ interface FeatureRow {
 
 interface ApiPost {
   id: number;
+  sortOrder: number | null;
   title: string;
   snippet: string | null;
   date: string | null;
@@ -52,6 +57,146 @@ interface ApiExperience {
   description: string | null;
   achievements: string | null; // JSON 数组字符串
   techStack: string | null; // JSON 数组字符串
+}
+
+function reorderIds<T extends { id: number | string }>(items: T[], draggedId: number | string, targetId: number | string) {
+  const ids = items.map((item) => item.id);
+  const from = ids.findIndex((id) => String(id) === String(draggedId));
+  const to = ids.findIndex((id) => String(id) === String(targetId));
+  if (from < 0 || to < 0 || from === to) return ids;
+  const next = [...ids];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+type DocDropPosition = "before" | "inside" | "after";
+
+function findDocParentInfo(nodes: DocNode[], id: string, parentId: string | null = null): { node: DocNode; parentId: string | null; siblings: DocNode[] } | null {
+  for (const node of nodes) {
+    if (node.id === id) return { node, parentId, siblings: nodes };
+    if (node.children) {
+      const found = findDocParentInfo(node.children, id, node.id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function isDocDescendant(parent: DocNode, possibleChildId: string): boolean {
+  return (parent.children ?? []).some((child) => child.id === possibleChildId || isDocDescendant(child, possibleChildId));
+}
+
+function withoutDocId(nodes: DocNode[], id: string) {
+  return nodes.filter((node) => node.id !== id);
+}
+
+function insertDocId(ids: string[], movedId: string, targetId: string, position: Exclude<DocDropPosition, "inside">) {
+  const next = ids.filter((id) => id !== movedId);
+  const targetIndex = next.indexOf(targetId);
+  if (targetIndex < 0) return next;
+  next.splice(position === "before" ? targetIndex : targetIndex + 1, 0, movedId);
+  return next;
+}
+
+function isRemoteOrRootPath(src: string) {
+  return /^(https?:)?\/\//i.test(src) || src.startsWith("data:") || src.startsWith("/") || src.startsWith("#");
+}
+
+function normalizeAssetPath(path: string) {
+  return decodeURIComponent(path)
+    .replace(/\\/g, "/")
+    .replace(/^(\.\/)+/, "")
+    .trim();
+}
+
+function assetFileName(path: string) {
+  return normalizeAssetPath(path).split("/").pop() || normalizeAssetPath(path);
+}
+
+function normalizeRelativePath(path: string) {
+  const parts: string[] = [];
+  for (const part of normalizeAssetPath(path).split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.join("/");
+}
+
+function joinRelativePath(baseDir: string, targetPath: string) {
+  if (!baseDir) return normalizeRelativePath(targetPath);
+  return normalizeRelativePath(`${baseDir}/${targetPath}`);
+}
+
+function getFileRelativePath(file: File) {
+  return normalizeRelativePath((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name);
+}
+
+function getDirname(path: string) {
+  const normalized = normalizeRelativePath(path);
+  const index = normalized.lastIndexOf("/");
+  return index >= 0 ? normalized.slice(0, index) : "";
+}
+
+function findMarkdownAssetFile(
+  imageFiles: File[],
+  byRelativePath: Map<string, File>,
+  byName: Map<string, File>,
+  markdownFile: File,
+  imagePath: string,
+) {
+  const markdownRelativePath = getFileRelativePath(markdownFile);
+  const markdownDir = getDirname(markdownRelativePath);
+  const resolvedFromMarkdown = joinRelativePath(markdownDir, imagePath);
+  const normalizedPath = normalizeAssetPath(imagePath);
+  const fileName = assetFileName(imagePath);
+  return (
+    byRelativePath.get(resolvedFromMarkdown) ||
+    byRelativePath.get(normalizedPath) ||
+    byName.get(fileName) ||
+    imageFiles.find((file) => {
+      const relativePath = getFileRelativePath(file);
+      return (
+        relativePath === resolvedFromMarkdown ||
+        relativePath.endsWith(`/${resolvedFromMarkdown}`) ||
+        relativePath.endsWith(`/${normalizedPath}`) ||
+        relativePath.endsWith(`/${fileName}`) ||
+        normalizedPath.endsWith(`/${relativePath}`)
+      );
+    }) ||
+    null
+  );
+}
+
+function extractMarkdownImagePaths(markdown: string) {
+  const paths = new Set<string>();
+  const markdownImagePattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  const htmlImagePattern = /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
+  const wikiImagePattern = /!\[\[([^\]|]+)(?:\|[^\]]*)?]]/g;
+
+  for (const pattern of [markdownImagePattern, htmlImagePattern, wikiImagePattern]) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(markdown))) {
+      const src = match[1].trim();
+      if (!isRemoteOrRootPath(src)) paths.add(src);
+    }
+  }
+
+  return Array.from(paths);
+}
+
+function replaceMarkdownAssetPath(markdown: string, originalPath: string, uploadedUrl: string) {
+  const escaped = originalPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const alt = originalPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") || "图片";
+  return markdown
+    .replace(new RegExp(`!\\[\\[${escaped}(?:\\|([^\\]]*))?]]`, "g"), (_match, label) => {
+      return `![${label || alt}](${uploadedUrl})`;
+    })
+    .replace(new RegExp(escaped, "g"), uploadedUrl);
 }
 
 type EditingContext = {
@@ -77,7 +222,18 @@ function countDocs(nodes: DocNode[]): number {
   return nodes.reduce((acc, n) => acc + (n.isFolder ? countDocs(n.children ?? []) : 1), 0);
 }
 
+function flattenDocs(nodes: DocNode[], trail: string[] = []): Array<{ node: DocNode; trail: string[] }> {
+  return nodes.flatMap((node) => {
+    const nextTrail = [...trail, node.title];
+    return [
+      { node, trail: nextTrail },
+      ...(node.children ? flattenDocs(node.children, nextTrail) : []),
+    ];
+  });
+}
+
 export function AdminPage() {
+  const { refresh: refreshSiteData } = useData();
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [editingContext, setEditingContext] = useState<EditingContext>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem("adminToken"));
@@ -106,6 +262,12 @@ export function AdminPage() {
   const [formFeatureRows, setFormFeatureRows] = useState<FeatureRow[]>([]);
   const dragIndexRef = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const assetImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingMarkdownImport, setPendingMarkdownImport] = useState<{
+    markdown: string;
+    markdownFile: File;
+    imagePaths: string[];
+  } | null>(null);
   const [formTags, setFormTags] = useState(""); // 逗号分隔
   const [formStack, setFormStack] = useState(""); // 逗号分隔
   const [formLink, setFormLink] = useState("");
@@ -134,6 +296,11 @@ export function AdminPage() {
       if (expRes.ok) setApiExperiences(await expRes.json());
     } catch {}
   }, []);
+
+  const refreshAllData = useCallback(async () => {
+    await fetchData();
+    await refreshSiteData();
+  }, [fetchData, refreshSiteData]);
 
   useEffect(() => {
     if (token) {
@@ -314,7 +481,7 @@ export function AdminPage() {
           await fetch("/api/posts", { method: "POST", headers, body: JSON.stringify(body) });
         }
       }
-      await fetchData();
+      await refreshAllData();
       setEditingContext(null);
     } finally {
       setSaving(false);
@@ -326,7 +493,150 @@ export function AdminPage() {
     const headers = { Authorization: `Bearer ${token}` };
     const baseMap = { project: "projects", doc: "docs", experience: "experiences", blog: "posts" } as const;
     await fetch(`/api/${baseMap[type]}/${id}`, { method: "DELETE", headers });
-    await fetchData();
+    await refreshAllData();
+  };
+
+  const saveOrder = async (type: "projects" | "posts" | "docs", ids: Array<number | string>) => {
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+    await fetch(`/api/${type}/reorder`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ ids }),
+    });
+    await refreshAllData();
+  };
+
+  const handleProjectReorder = async (ids: Array<number | string>) => {
+    setApiProjects((items) => ids.map((id) => items.find((item) => String(item.id) === String(id))).filter(Boolean) as ApiProject[]);
+    await saveOrder("projects", ids);
+  };
+
+  const handlePostReorder = async (ids: Array<number | string>) => {
+    setApiPosts((items) => ids.map((id) => items.find((item) => String(item.id) === String(id))).filter(Boolean) as ApiPost[]);
+    await saveOrder("posts", ids);
+  };
+
+  const handleDocReorder = async (ids: Array<number | string>) => {
+    await saveOrder("docs", ids);
+  };
+
+  const handleDocMove = async (payload: {
+    movedId: string;
+    newParentId: string | null;
+    oldSiblingIds: string[];
+    newSiblingIds: string[];
+  }) => {
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+    await fetch("/api/docs/move", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    await refreshAllData();
+  };
+
+  const uploadMarkdownAsset = async (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!res.ok) throw new Error(`上传失败：${file.name}`);
+    const data = await res.json();
+    if (!data.url) throw new Error(`上传失败：${file.name}`);
+    return data.url as string;
+  };
+
+  const resolveMarkdownAssets = async (
+    markdown: string,
+    markdownFile: File,
+    imagePaths: string[],
+    files: FileList | File[],
+  ) => {
+    const fileArray = Array.from(files);
+    const imageFiles = fileArray.filter((file) => file.type.startsWith("image/"));
+    const unmatched: string[] = [];
+    const byRelativePath = new Map<string, File>();
+    const byName = new Map<string, File>();
+    imageFiles.forEach((file) => {
+      const relativePath = getFileRelativePath(file);
+      byRelativePath.set(relativePath, file);
+      byName.set(file.name, file);
+    });
+
+    for (const imagePath of imagePaths) {
+      const imageFile = findMarkdownAssetFile(imageFiles, byRelativePath, byName, markdownFile, imagePath);
+      if (!imageFile) {
+        unmatched.push(imagePath);
+        continue;
+      }
+      const uploadedUrl = await uploadMarkdownAsset(imageFile);
+      markdown = replaceMarkdownAssetPath(markdown, imagePath, uploadedUrl);
+    }
+
+    return { markdown, unmatched };
+  };
+
+  const importMarkdownOnly = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const fileArray = Array.from(files);
+    const markdownFile = fileArray.find((file) => /\.(md|markdown)$/i.test(file.name));
+    if (!markdownFile) {
+      alert("请选择一个 .md 或 .markdown 文件");
+      return;
+    }
+
+    let markdown = await markdownFile.text();
+    const imagePaths = extractMarkdownImagePaths(markdown);
+    const imageFiles = fileArray.filter((file) => file.type.startsWith("image/"));
+
+    if (imageFiles.length > 0 && imagePaths.length > 0) {
+      const resolved = await resolveMarkdownAssets(markdown, markdownFile, imagePaths, imageFiles);
+      markdown = resolved.markdown;
+      if (resolved.unmatched.length > 0) {
+        setPendingMarkdownImport({ markdown, markdownFile, imagePaths: resolved.unmatched });
+        setTimeout(() => assetImportInputRef.current?.click(), 0);
+        alert(`还有 ${resolved.unmatched.length} 张图片未找到，请继续选择图片所在文件夹或图片文件。`);
+      } else {
+        setPendingMarkdownImport(null);
+      }
+    } else if (imagePaths.length > 0) {
+      setPendingMarkdownImport({ markdown, markdownFile, imagePaths });
+      setTimeout(() => assetImportInputRef.current?.click(), 0);
+      alert(`检测到 ${imagePaths.length} 张本地图片引用，请选择图片所在文件夹或图片文件。`);
+    } else {
+      setPendingMarkdownImport(null);
+    }
+
+    setFormContent(markdown);
+    if (!formTitle.trim()) {
+      setFormTitle(markdownFile.name.replace(/\.(md|markdown)$/i, ""));
+    }
+  };
+
+  const importAssetsForPendingMarkdown = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !pendingMarkdownImport) return;
+    const resolved = await resolveMarkdownAssets(
+      pendingMarkdownImport.markdown,
+      pendingMarkdownImport.markdownFile,
+      pendingMarkdownImport.imagePaths,
+      files,
+    );
+    setFormContent(resolved.markdown);
+    if (resolved.unmatched.length > 0) {
+      setPendingMarkdownImport({
+        ...pendingMarkdownImport,
+        markdown: resolved.markdown,
+        imagePaths: resolved.unmatched,
+      });
+      alert(`仍有 ${resolved.unmatched.length} 张图片没有找到，路径已保留：\n${resolved.unmatched.join("\n")}`);
+    } else {
+      setPendingMarkdownImport(null);
+    }
   };
 
   const handleLogout = () => {
@@ -428,7 +738,7 @@ export function AdminPage() {
 
       {/* Main Content */}
       <div className="ml-64 flex-1 p-8">
-        <div className="max-w-5xl mx-auto">
+        <div className={activeTab === "blog" || activeTab === "docs" ? "max-w-[1600px] mx-auto" : "max-w-5xl mx-auto"}>
           {activeTab === "overview" && (
             <OverviewTab
               projectCount={apiProjects.length}
@@ -444,6 +754,7 @@ export function AdminPage() {
               onNew={() => setEditingContext({ type: "project", item: null })}
               onEdit={(item) => setEditingContext({ type: "project", item })}
               onDelete={(id) => handleDelete("project", id)}
+              onReorder={handleProjectReorder}
             />
           )}
           {activeTab === "blog" && (
@@ -452,6 +763,26 @@ export function AdminPage() {
               onNew={() => setEditingContext({ type: "blog", item: null })}
               onEdit={(item) => setEditingContext({ type: "blog", item })}
               onDelete={(id) => handleDelete("blog", id)}
+              onReorder={handlePostReorder}
+              editorActive={editingContext?.type === "blog"}
+              activePostId={editingContext?.type === "blog" && editingContext.item ? (editingContext.item as ApiPost).id : null}
+              formTitle={formTitle}
+              setFormTitle={setFormTitle}
+              formSnippet={formSnippet}
+              setFormSnippet={setFormSnippet}
+              formDate={formDate}
+              setFormDate={setFormDate}
+              formReadTime={formReadTime}
+              setFormReadTime={setFormReadTime}
+              formContent={formContent}
+              setFormContent={setFormContent}
+              onSave={handleSave}
+              saving={saving}
+              canSave={!!editingContext && editingContext.type === "blog" && !!formTitle.trim()}
+              importMarkdownOnly={importMarkdownOnly}
+              importAssetsForPendingMarkdown={importAssetsForPendingMarkdown}
+              assetImportInputRef={assetImportInputRef}
+              pendingMarkdownImport={pendingMarkdownImport}
             />
           )}
           {activeTab === "docs" && (
@@ -463,6 +794,21 @@ export function AdminPage() {
               onDelete={(node) =>
                 handleDelete("doc", node.id, "", true)
               }
+              onMove={handleDocMove}
+              editorActive={editingContext?.type === "doc" && !editingDocIsFolder}
+              activeDocId={editingContext?.type === "doc" && editingContext.item ? (editingContext.item as DocNode).id : null}
+              editingDocIsFolder={editingDocIsFolder}
+              formTitle={formTitle}
+              setFormTitle={setFormTitle}
+              formContent={formContent}
+              setFormContent={setFormContent}
+              onSave={handleSave}
+              saving={saving}
+              canSave={!!editingContext && editingContext.type === "doc" && !editingDocIsFolder && !!formTitle.trim()}
+              importMarkdownOnly={importMarkdownOnly}
+              importAssetsForPendingMarkdown={importAssetsForPendingMarkdown}
+              assetImportInputRef={assetImportInputRef}
+              pendingMarkdownImport={pendingMarkdownImport}
             />
           )}
           {activeTab === "experience" && (
@@ -478,7 +824,7 @@ export function AdminPage() {
 
       {/* Editor Modal */}
       <AnimatePresence>
-        {editingContext && (
+        {editingContext && !(editingContext.type === "blog" || (editingContext.type === "doc" && !editingDocIsFolder)) && (
           <>
             <motion.div
               initial={{ opacity: 0 }}
@@ -925,7 +1271,76 @@ export function AdminPage() {
 
                 {(editingContext.type === "blog" || (editingContext.type === "doc" && !editingDocIsFolder)) && (
                   <div className="flex-1 flex flex-col">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Markdown 正文内容</label>
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <label className="block text-sm font-medium text-gray-700">Markdown 正文内容</label>
+                      <div className="flex items-center gap-2">
+                        <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 cursor-pointer transition-colors">
+                          <input
+                            type="file"
+                            className="hidden"
+                            accept=".md,.markdown"
+                            onChange={async (e) => {
+                              try {
+                                await importMarkdownOnly(e.target.files);
+                              } catch (error) {
+                                alert(error instanceof Error ? error.message : "导入失败");
+                              } finally {
+                                e.currentTarget.value = "";
+                              }
+                            }}
+                          />
+                          <UploadCloud className="w-4 h-4" />
+                          导入 Markdown
+                        </label>
+                        <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 cursor-pointer transition-colors">
+                          <input
+                            ref={assetImportInputRef}
+                            type="file"
+                            className="hidden"
+                            multiple
+                            {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+                            onChange={async (e) => {
+                              try {
+                                await importAssetsForPendingMarkdown(e.target.files);
+                              } catch (error) {
+                                alert(error instanceof Error ? error.message : "导入失败");
+                              } finally {
+                                e.currentTarget.value = "";
+                              }
+                            }}
+                          />
+                          <Folder className="w-4 h-4" />
+                          选择图片位置
+                        </label>
+                        <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 cursor-pointer transition-colors">
+                          <input
+                            type="file"
+                            className="hidden"
+                            multiple
+                            accept="image/*"
+                            onChange={async (e) => {
+                              try {
+                                await importAssetsForPendingMarkdown(e.target.files);
+                              } catch (error) {
+                                alert(error instanceof Error ? error.message : "导入失败");
+                              } finally {
+                                e.currentTarget.value = "";
+                              }
+                            }}
+                          />
+                          <UploadCloud className="w-4 h-4" />
+                          选择图片文件
+                        </label>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-400 mb-2">
+                      先导入 .md 文件；如果检测到本地图片引用，会提示选择图片所在文件夹并自动替换为 /uploads 地址。
+                    </p>
+                    {pendingMarkdownImport && (
+                      <p className="text-xs text-amber-600 mb-2">
+                        还有 {pendingMarkdownImport.imagePaths.length} 张图片等待匹配，请点击“选择图片位置”。
+                      </p>
+                    )}
                     <textarea
                       value={formContent}
                       onChange={(e) => setFormContent(e.target.value)}
@@ -1002,12 +1417,23 @@ function ProjectsManager({
   onNew,
   onEdit,
   onDelete,
+  onReorder,
 }: {
   projects: ApiProject[];
   onNew: () => void;
   onEdit: (item: ApiProject) => void;
   onDelete: (id: number) => void;
+  onReorder: (ids: Array<number | string>) => void;
 }) {
+  const dragIdRef = useRef<number | null>(null);
+
+  const handleDrop = (targetId: number) => {
+    const draggedId = dragIdRef.current;
+    dragIdRef.current = null;
+    if (!draggedId || draggedId === targetId) return;
+    onReorder(reorderIds(projects, draggedId, targetId));
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
       <div className="flex items-center justify-between mb-8">
@@ -1024,7 +1450,14 @@ function ProjectsManager({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {projects.map((p) => (
-            <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+            <div
+              key={p.id}
+              draggable
+              onDragStart={() => { dragIdRef.current = p.id; }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => handleDrop(p.id)}
+              className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col cursor-grab active:cursor-grabbing"
+            >
               <div className="relative h-40 bg-gray-100 shrink-0">
                 {p.imageUrl ? (
                   <img src={p.imageUrl} className="w-full h-full object-cover" alt="" />
@@ -1053,6 +1486,9 @@ function ProjectsManager({
                   {p.description && <p className="text-gray-500 text-sm mt-2 line-clamp-2">{p.description}</p>}
                 </div>
                 <div className="flex items-center gap-2 mt-auto pt-3 border-t border-gray-50">
+                  <span className="flex items-center justify-center p-2 text-gray-300" title="拖拽排序">
+                    <GripVertical className="w-4 h-4" />
+                  </span>
                   <button onClick={() => onEdit(p)} className="flex-1 flex items-center justify-center gap-2 py-2 bg-gray-50 hover:bg-indigo-50 hover:text-indigo-600 text-gray-700 font-medium rounded-lg transition-colors text-sm">
                     <Edit3 className="w-4 h-4" /> 编辑
                   </button>
@@ -1074,51 +1510,770 @@ function BlogManager({
   onNew,
   onEdit,
   onDelete,
+  onReorder,
+  editorActive,
+  activePostId,
+  formTitle,
+  setFormTitle,
+  formSnippet,
+  setFormSnippet,
+  formDate,
+  setFormDate,
+  formReadTime,
+  setFormReadTime,
+  formContent,
+  setFormContent,
+  onSave,
+  saving,
+  canSave,
+  importMarkdownOnly,
+  importAssetsForPendingMarkdown,
+  assetImportInputRef,
+  pendingMarkdownImport,
 }: {
   posts: ApiPost[];
   onNew: () => void;
   onEdit: (item: ApiPost) => void;
   onDelete: (id: number) => void;
+  onReorder: (ids: Array<number | string>) => void;
+  editorActive: boolean;
+  activePostId: number | null;
+  formTitle: string;
+  setFormTitle: (value: string) => void;
+  formSnippet: string;
+  setFormSnippet: (value: string) => void;
+  formDate: string;
+  setFormDate: (value: string) => void;
+  formReadTime: string;
+  setFormReadTime: (value: string) => void;
+  formContent: string;
+  setFormContent: (value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  canSave: boolean;
+  importMarkdownOnly: (files: FileList | null) => Promise<void>;
+  importAssetsForPendingMarkdown: (files: FileList | null) => Promise<void>;
+  assetImportInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  pendingMarkdownImport: { markdown: string; markdownFile: File; imagePaths: string[] } | null;
 }) {
+  const dragIdRef = useRef<number | null>(null);
+  const [query, setQuery] = useState("");
+  const filteredPosts = posts.filter((post) => {
+    const text = `${post.title} ${post.snippet ?? ""} ${post.date ?? ""}`.toLowerCase();
+    return text.includes(query.trim().toLowerCase());
+  });
+
+  const handleDrop = (targetId: number) => {
+    const draggedId = dragIdRef.current;
+    dragIdRef.current = null;
+    if (!draggedId || draggedId === targetId) return;
+    onReorder(reorderIds(posts, draggedId, targetId));
+  };
+
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">博客管理</h1>
-        <button onClick={onNew} className="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors">
-          <Plus className="w-5 h-5" /> 写新文章
-        </button>
-      </div>
-      {posts.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-12 text-center text-gray-400">
-          <FileText className="w-12 h-12 text-gray-200 mx-auto mb-4" />
-          <p>暂无文章，点击右上角新建</p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="divide-y divide-gray-100">
-            {posts.map((p) => (
-              <div key={p.id} className="p-6 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                <div>
-                  <h3 className="font-bold text-lg text-gray-900 mb-1">{p.title}</h3>
-                  <div className="flex gap-4 text-sm text-gray-500">
-                    {p.date && <span>{p.date}</span>}
-                    {p.readTime && <span>{p.readTime}</span>}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => onEdit(p)} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
-                    <Edit3 className="w-5 h-5" />
-                  </button>
-                  <button onClick={() => onDelete(p.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-[calc(100vh-4rem)]">
+      <div className="h-full overflow-hidden rounded-2xl border border-slate-200 bg-[#f4fbfb] shadow-sm">
+        <div className="grid h-full grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="flex min-h-0 flex-col border-r border-slate-200 bg-white/80">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div>
+                <h1 className="text-base font-bold text-slate-900">博客文章</h1>
+                <p className="text-xs text-slate-400">{posts.length} 篇文章</p>
               </div>
-            ))}
+              <button onClick={onNew} title="写新文章" className="rounded-lg bg-teal-500 p-2 text-white transition-colors hover:bg-teal-600">
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-3">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-400">
+                <Search className="h-4 w-4" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                  placeholder="搜索标题、摘要..."
+                />
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 custom-scrollbar">
+              {filteredPosts.length === 0 ? (
+                <div className="px-4 py-12 text-center text-sm text-slate-400">暂无匹配文章</div>
+              ) : (
+                filteredPosts.map((p) => {
+                  const active = activePostId === p.id;
+                  return (
+                    <div
+                      key={p.id}
+                      draggable
+                      onDragStart={() => { dragIdRef.current = p.id; }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => handleDrop(p.id)}
+                      className={`group mb-1 flex cursor-grab items-start gap-2 rounded-xl px-3 py-3 transition-colors active:cursor-grabbing ${
+                        active ? "bg-teal-50 text-teal-700 ring-1 ring-teal-100" : "text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      <GripVertical className="mt-1 h-4 w-4 shrink-0 text-slate-300" />
+                      <button onClick={() => onEdit(p)} className="min-w-0 flex-1 text-left">
+                        <div className="flex items-center gap-2">
+                          <FileText className={`h-4 w-4 shrink-0 ${active ? "text-teal-500" : "text-slate-400"}`} />
+                          <span className="block truncate text-sm font-semibold">{p.title}</span>
+                        </div>
+                        <div className="mt-1 truncate pl-6 text-xs text-slate-400">
+                          {[p.date, p.readTime].filter(Boolean).join(" / ") || "未设置元信息"}
+                        </div>
+                      </button>
+                      <button onClick={() => onDelete(p.id)} title="删除" className="rounded-md p-1.5 text-slate-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+
+          <MarkdownWorkspaceEditor
+            kind="blog"
+            active={editorActive}
+            title={formTitle}
+            setTitle={setFormTitle}
+            content={formContent}
+            setContent={setFormContent}
+            snippet={formSnippet}
+            setSnippet={setFormSnippet}
+            date={formDate}
+            setDate={setFormDate}
+            readTime={formReadTime}
+            setReadTime={setFormReadTime}
+            onSave={onSave}
+            saving={saving}
+            canSave={canSave}
+            importMarkdownOnly={importMarkdownOnly}
+            importAssetsForPendingMarkdown={importAssetsForPendingMarkdown}
+            assetImportInputRef={assetImportInputRef}
+            pendingMarkdownImport={pendingMarkdownImport}
+          />
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function MarkdownWorkspaceEditor({
+  kind,
+  active,
+  title,
+  setTitle,
+  content,
+  setContent,
+  snippet,
+  setSnippet,
+  date,
+  setDate,
+  readTime,
+  setReadTime,
+  breadcrumb,
+  onSave,
+  saving,
+  canSave,
+  importMarkdownOnly,
+  importAssetsForPendingMarkdown,
+  assetImportInputRef,
+  pendingMarkdownImport,
+}: {
+  kind: "blog" | "doc";
+  active: boolean;
+  title: string;
+  setTitle: (value: string) => void;
+  content: string;
+  setContent: (value: string) => void;
+  snippet?: string;
+  setSnippet?: (value: string) => void;
+  date?: string;
+  setDate?: (value: string) => void;
+  readTime?: string;
+  setReadTime?: (value: string) => void;
+  breadcrumb?: string;
+  onSave: () => void;
+  saving: boolean;
+  canSave: boolean;
+  importMarkdownOnly: (files: FileList | null) => Promise<void>;
+  importAssetsForPendingMarkdown: (files: FileList | null) => Promise<void>;
+  assetImportInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  pendingMarkdownImport: { markdown: string; markdownFile: File; imagePaths: string[] } | null;
+}) {
+  if (!active) {
+    return (
+      <section className="flex h-full items-center justify-center bg-[#f4fbfb] p-8">
+        <div className="max-w-sm text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-teal-500 shadow-sm ring-1 ring-slate-100">
+            {kind === "blog" ? <FileText className="h-6 w-6" /> : <BookOpen className="h-6 w-6" />}
+          </div>
+          <h2 className="text-lg font-bold text-slate-800">{kind === "blog" ? "选择或新建一篇博客" : "选择或新建一篇面经文档"}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">左侧负责组织内容，右侧会像 Obsidian 一样同步编辑 Markdown 并实时预览。</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex min-h-0 flex-col bg-[#f4fbfb]">
+      <header className="border-b border-slate-200 bg-white/70 px-5 py-3">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="mb-1 flex items-center gap-2 text-xs text-slate-400">
+              <PanelLeftClose className="h-3.5 w-3.5" />
+              <span className="truncate">{breadcrumb || (kind === "blog" ? "博客 / 文章" : "面经 / 文档")}</span>
+            </div>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full bg-transparent text-2xl font-bold tracking-normal text-slate-900 outline-none placeholder:text-slate-300"
+              placeholder={kind === "blog" ? "未命名博客" : "未命名文档"}
+            />
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <MarkdownImportControls
+              importMarkdownOnly={importMarkdownOnly}
+              importAssetsForPendingMarkdown={importAssetsForPendingMarkdown}
+              assetImportInputRef={assetImportInputRef}
+            />
+            <button
+              onClick={onSave}
+              disabled={saving || !canSave}
+              className="inline-flex items-center gap-2 rounded-xl bg-teal-500 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              保存发布
+            </button>
           </div>
         </div>
+
+        {kind === "blog" && (
+          <div className="grid grid-cols-[150px_150px_minmax(0,1fr)] gap-3">
+            <input
+              value={date ?? ""}
+              onChange={(e) => setDate?.(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 outline-none transition-colors focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+              placeholder="日期"
+            />
+            <input
+              value={readTime ?? ""}
+              onChange={(e) => setReadTime?.(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 outline-none transition-colors focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+              placeholder="阅读时间"
+            />
+            <input
+              value={snippet ?? ""}
+              onChange={(e) => setSnippet?.(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 outline-none transition-colors focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+              placeholder="文章摘要"
+            />
+          </div>
+        )}
+
+        {pendingMarkdownImport && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            还有 {pendingMarkdownImport.imagePaths.length} 张图片等待匹配，请点击“选择图片位置”。
+          </div>
+        )}
+      </header>
+
+      <LiveMarkdownEditor content={content} setContent={setContent} />
+    </section>
+  );
+}
+
+function LiveMarkdownEditor({
+  content,
+  setContent,
+}: {
+  content: string;
+  setContent: (value: string) => void;
+}) {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastMarkdownRef = useRef<string>("");
+  const [tocCollapsed, setTocCollapsed] = useState(false);
+  const headings = useMemo(() => extractMarkdownHeadings(content, [1, 2, 3, 4]), [content]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || lastMarkdownRef.current === content) return;
+    editor.innerHTML = markdownToEditableHtml(content);
+    lastMarkdownRef.current = content;
+  }, [content]);
+
+  const syncMarkdown = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const markdown = editableHtmlToMarkdown(editor);
+    lastMarkdownRef.current = markdown;
+    setContent(markdown);
+  };
+
+  const handleShortcut = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== " ") return;
+    const selection = window.getSelection();
+    const node = selection?.anchorNode;
+    if (!node) return;
+    const block = getEditableBlock(node, editorRef.current);
+    if (!block) return;
+    const text = block.textContent?.trim() ?? "";
+    const heading = /^(#{1,6})$/.exec(text);
+    if (heading) {
+      event.preventDefault();
+      const level = heading[1].length;
+      const next = document.createElement(`h${level}`);
+      next.innerHTML = "<br>";
+      block.replaceWith(next);
+      placeCaretAtEnd(next);
+      syncMarkdown();
+      return;
+    }
+    if (text === "-" || text === "*") {
+      event.preventDefault();
+      const list = document.createElement("ul");
+      const item = document.createElement("li");
+      item.innerHTML = "<br>";
+      list.appendChild(item);
+      block.replaceWith(list);
+      placeCaretAtEnd(item);
+      syncMarkdown();
+    }
+  };
+
+  const scrollToHeading = (id: string) => {
+    const container = scrollContainerRef.current;
+    const target = editorRef.current?.querySelector(`[data-heading-id="${CSS.escape(id)}"]`);
+    if (!container || !(target instanceof HTMLElement)) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    container.scrollTo({
+      top: container.scrollTop + targetRect.top - containerRect.top - 32,
+      behavior: "smooth",
+    });
+  };
+
+  return (
+    <div className="grid min-h-0 flex-1 bg-[#f4fbfb]" style={{ gridTemplateColumns: tocCollapsed ? "minmax(0,1fr) 48px" : "minmax(0,1fr) 260px" }}>
+      <div ref={scrollContainerRef} className="min-h-0 overflow-y-auto custom-scrollbar">
+        <div className="mx-auto max-w-4xl px-8 py-8">
+          <div className="rounded-2xl border border-slate-200 bg-white/70 px-8 py-7 shadow-sm">
+          <div className="mb-5 flex items-center justify-between border-b border-slate-100 pb-4 text-xs font-bold uppercase tracking-wide text-slate-400">
+            <span>Live Preview</span>
+            <span>直接在正文中编辑</span>
+          </div>
+          <div
+            ref={editorRef}
+            contentEditable
+            suppressContentEditableWarning
+            onInput={syncMarkdown}
+            onClick={(event) => {
+              const target = event.target;
+              if (!(target instanceof HTMLElement)) return;
+              const action = target.closest<HTMLButtonElement>("[data-table-action]");
+              if (!action) return;
+              event.preventDefault();
+              const wrapper = action.closest<HTMLElement>("[data-md-table]");
+              if (!wrapper) return;
+              if (action.dataset.tableAction === "add-row") addEditableTableRow(wrapper);
+              if (action.dataset.tableAction === "add-column") addEditableTableColumn(wrapper);
+              syncMarkdown();
+            }}
+            onBlur={syncMarkdown}
+            onKeyDown={handleShortcut}
+            onPaste={(event) => {
+              event.preventDefault();
+              const text = event.clipboardData.getData("text/plain");
+              document.execCommand("insertText", false, text);
+            }}
+            className="typora-live-editor min-h-[620px] outline-none"
+            data-placeholder="开始编写内容..."
+          />
+          </div>
+        </div>
+      </div>
+      <AdminHeadingToc
+        headings={headings}
+        collapsed={tocCollapsed}
+        onToggle={() => setTocCollapsed((value) => !value)}
+        onSelect={scrollToHeading}
+      />
+    </div>
+  );
+}
+
+function AdminHeadingToc({
+  headings,
+  collapsed,
+  onToggle,
+  onSelect,
+}: {
+  headings: ReturnType<typeof extractMarkdownHeadings>;
+  collapsed: boolean;
+  onToggle: () => void;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <aside className="min-h-0 border-l border-slate-200 bg-white/70">
+      <button
+        onClick={onToggle}
+        className="flex h-12 w-full items-center justify-center border-b border-slate-100 text-xs font-bold text-slate-400 transition-colors hover:bg-teal-50 hover:text-teal-600"
+        title={collapsed ? "展开标题树" : "收起标题树"}
+      >
+        {collapsed ? "»" : "«"}
+      </button>
+      {!collapsed && (
+        <div className="max-h-[calc(100vh-220px)] overflow-y-auto p-3 custom-scrollbar">
+          {headings.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-slate-400">暂无标题</p>
+          ) : (
+            <div className="space-y-1">
+              {headings.map((heading) => (
+                <button
+                  key={`${heading.id}-${heading.line}`}
+                  onClick={() => onSelect(heading.id)}
+                  className="block w-full rounded-lg px-2 py-1.5 text-left text-xs leading-5 text-slate-500 transition-colors hover:bg-teal-50 hover:text-teal-700"
+                  style={{ paddingLeft: `${(heading.level - 1) * 12 + 8}px` }}
+                >
+                  <span className={heading.level <= 2 ? "font-semibold text-slate-700" : ""}>{heading.text}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
-    </motion.div>
+    </aside>
+  );
+}
+
+function markdownToEditableHtml(markdown: string) {
+  const lines = markdown.split(/\r?\n/);
+  const html: string[] = [];
+  let inCode = false;
+  let codeLines: string[] = [];
+  const headingCounts = new Map<string, number>();
+
+  const flushCode = () => {
+    html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+    codeLines = [];
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
+    const line = rawLine.trimEnd();
+    if (/^```/.test(line.trim())) {
+      if (inCode) {
+        flushCode();
+        inCode = false;
+      } else {
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeLines.push(rawLine);
+      continue;
+    }
+    if (isMarkdownTableRow(line) && isMarkdownTableSeparator(lines[index + 1] ?? "")) {
+      const tableLines = [line, lines[index + 1]];
+      index += 2;
+      while (index < lines.length && isMarkdownTableRow(lines[index])) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+      index -= 1;
+      html.push(markdownTableToEditableHtml(tableLines));
+      continue;
+    }
+    if (!line.trim()) {
+      html.push("<p><br></p>");
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (heading) {
+      const level = heading[1].length;
+      const headingText = stripEditableMarkdown(heading[2]);
+      const id = createEditableHeadingId(headingText, headingCounts);
+      html.push(`<h${level} id="${id}" data-heading-id="${id}">${inlineMarkdownToHtml(heading[2])}</h${level}>`);
+      continue;
+    }
+    const quote = /^>\s?(.*)$/.exec(line);
+    if (quote) {
+      html.push(`<blockquote>${inlineMarkdownToHtml(quote[1])}</blockquote>`);
+      continue;
+    }
+    const bullet = /^[-*]\s+(.+)$/.exec(line);
+    if (bullet) {
+      html.push(`<ul><li>${inlineMarkdownToHtml(bullet[1])}</li></ul>`);
+      continue;
+    }
+    const ordered = /^(\d+)\.\s+(.+)$/.exec(line);
+    if (ordered) {
+      html.push(`<ol start="${ordered[1]}"><li>${inlineMarkdownToHtml(ordered[2])}</li></ol>`);
+      continue;
+    }
+    html.push(`<p>${inlineMarkdownToHtml(line)}</p>`);
+  }
+
+  if (inCode) flushCode();
+  return html.join("") || "<p><br></p>";
+}
+
+function isMarkdownTableRow(line: string) {
+  const trimmed = line.trim();
+  return trimmed.includes("|") && !/^```/.test(trimmed);
+}
+
+function isMarkdownTableSeparator(line: string) {
+  const cells = splitMarkdownTableRow(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function splitMarkdownTableRow(line: string) {
+  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  return trimmed.split("|").map((cell) => cell.trim());
+}
+
+function markdownTableToEditableHtml(lines: string[]) {
+  const headers = splitMarkdownTableRow(lines[0] ?? "");
+  const rows = lines.slice(2).map(splitMarkdownTableRow);
+  const columnCount = Math.max(headers.length, ...rows.map((row) => row.length), 1);
+  const normalizedHeaders = normalizeTableCells(headers, columnCount);
+  const normalizedRows = rows.map((row) => normalizeTableCells(row, columnCount));
+
+  return [
+    '<div class="md-table-wrapper" data-md-table contenteditable="false">',
+    "<table>",
+    "<thead><tr>",
+    normalizedHeaders.map((cell) => `<th contenteditable="true">${inlineMarkdownToHtml(cell) || "<br>"}</th>`).join(""),
+    "</tr></thead>",
+    "<tbody>",
+    normalizedRows.map((row) => `<tr>${row.map((cell) => `<td contenteditable="true">${inlineMarkdownToHtml(cell) || "<br>"}</td>`).join("")}</tr>`).join(""),
+    "</tbody>",
+    "</table>",
+    '<button type="button" class="md-table-add md-table-add-col" data-table-action="add-column" contenteditable="false" aria-label="在右方新增列">+</button>',
+    '<button type="button" class="md-table-add md-table-add-row" data-table-action="add-row" contenteditable="false" aria-label="在下方新增行">+</button>',
+    "</div>",
+  ].join("");
+}
+
+function normalizeTableCells(cells: string[], count: number) {
+  return Array.from({ length: count }, (_, index) => cells[index] ?? "");
+}
+
+function inlineMarkdownToHtml(text: string) {
+  return escapeHtml(text)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([\s\S]+?)\*\*/g, "<strong>$1</strong>");
+}
+
+function stripEditableMarkdown(value: string) {
+  return value
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([\s\S]+?)\*\*/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+}
+
+function createEditableHeadingId(text: string, counts: Map<string, number>) {
+  const base = slugifyMarkdownHeading(text);
+  const count = counts.get(base) ?? 0;
+  counts.set(base, count + 1);
+  return count === 0 ? base : `${base}-${count}`;
+}
+
+function editableHtmlToMarkdown(root: HTMLElement) {
+  const lines: string[] = [];
+  root.childNodes.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const tag = node.tagName.toLowerCase();
+    if (/h[1-6]/.test(tag)) {
+      lines.push(`${"#".repeat(Number(tag[1]))} ${inlineHtmlToMarkdown(node)}`.trimEnd());
+    } else if (tag === "blockquote") {
+      lines.push(`> ${inlineHtmlToMarkdown(node)}`.trimEnd());
+    } else if (tag === "ul") {
+      node.querySelectorAll(":scope > li").forEach((li) => lines.push(`- ${inlineHtmlToMarkdown(li as HTMLElement)}`.trimEnd()));
+    } else if (tag === "ol") {
+      node.querySelectorAll(":scope > li").forEach((li, index) => lines.push(`${index + 1}. ${inlineHtmlToMarkdown(li as HTMLElement)}`.trimEnd()));
+    } else if (tag === "pre") {
+      lines.push("```");
+      lines.push(node.textContent ?? "");
+      lines.push("```");
+    } else if (node.matches("[data-md-table]")) {
+      lines.push(...editableTableToMarkdown(node));
+    } else if (tag === "table") {
+      lines.push(...editableTableToMarkdown(node));
+    } else {
+      lines.push(inlineHtmlToMarkdown(node));
+    }
+  });
+  return lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
+}
+
+function editableTableToMarkdown(root: HTMLElement) {
+  const table = root.tagName.toLowerCase() === "table" ? root : root.querySelector("table");
+  if (!table) return [];
+  const headerCells = Array.from(table.querySelectorAll("thead tr:first-child th")) as HTMLElement[];
+  const bodyRows = Array.from(table.querySelectorAll("tbody tr")) as HTMLTableRowElement[];
+  const fallbackFirstRow = headerCells.length === 0 ? Array.from(table.querySelectorAll("tr:first-child > *")) as HTMLElement[] : [];
+  const headers = (headerCells.length > 0 ? headerCells : fallbackFirstRow).map(tableCellToMarkdown);
+  const columnCount = Math.max(headers.length, ...bodyRows.map((row) => row.children.length), 1);
+  const normalizedHeaders = normalizeTableCells(headers, columnCount).map((cell, index) => cell || `列${index + 1}`);
+  const body = bodyRows.map((row) => normalizeTableCells(Array.from(row.children).map((cell) => tableCellToMarkdown(cell as HTMLElement)), columnCount));
+
+  return [
+    `| ${normalizedHeaders.join(" | ")} |`,
+    `| ${normalizedHeaders.map(() => "---").join(" | ")} |`,
+    ...body.map((row) => `| ${row.join(" | ")} |`),
+  ];
+}
+
+function tableCellToMarkdown(cell: HTMLElement) {
+  return inlineHtmlToMarkdown(cell)
+    .replace(/\n+/g, " ")
+    .replace(/\|/g, "\\|")
+    .trim();
+}
+
+function inlineHtmlToMarkdown(element: HTMLElement): string {
+  let output = "";
+  element.childNodes.forEach((child) => {
+    if (child instanceof HTMLElement && child.closest("[data-table-action]")) return;
+    if (child.nodeType === Node.TEXT_NODE) {
+      output += child.textContent ?? "";
+      return;
+    }
+    if (!(child instanceof HTMLElement)) return;
+    const tag = child.tagName.toLowerCase();
+    if (tag === "strong" || tag === "b") {
+      output += `**${inlineHtmlToMarkdown(child)}**`;
+    } else if (tag === "code") {
+      output += `\`${child.textContent ?? ""}\``;
+    } else if (tag === "br") {
+      output += "";
+    } else {
+      output += inlineHtmlToMarkdown(child);
+    }
+  });
+  return output;
+}
+
+function addEditableTableColumn(wrapper: HTMLElement) {
+  const table = wrapper.querySelector("table");
+  if (!table) return;
+  const headerRow = table.querySelector("thead tr") ?? table.querySelector("tr");
+  if (headerRow) {
+    const th = document.createElement("th");
+    th.contentEditable = "true";
+    th.innerHTML = "<br>";
+    headerRow.appendChild(th);
+    placeCaretAtEnd(th);
+  }
+  table.querySelectorAll("tbody tr").forEach((row) => {
+    const td = document.createElement("td");
+    td.contentEditable = "true";
+    td.innerHTML = "<br>";
+    row.appendChild(td);
+  });
+}
+
+function addEditableTableRow(wrapper: HTMLElement) {
+  const table = wrapper.querySelector("table");
+  if (!table) return;
+  const tbody = table.querySelector("tbody") ?? table.appendChild(document.createElement("tbody"));
+  const columnCount = Math.max(table.querySelector("thead tr")?.children.length ?? 0, table.querySelector("tr")?.children.length ?? 1, 1);
+  const tr = document.createElement("tr");
+  for (let index = 0; index < columnCount; index += 1) {
+    const td = document.createElement("td");
+    td.contentEditable = "true";
+    td.innerHTML = "<br>";
+    tr.appendChild(td);
+  }
+  tbody.appendChild(tr);
+  placeCaretAtEnd(tr.firstElementChild as HTMLElement);
+}
+
+function getEditableBlock(node: Node, root: HTMLElement | null) {
+  let current: Node | null = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+  while (current && current !== root) {
+    if (current instanceof HTMLElement && /^(p|div|h[1-6]|blockquote|li)$/i.test(current.tagName)) {
+      return current;
+    }
+    current = current.parentNode;
+  }
+  return null;
+}
+
+function placeCaretAtEnd(element: HTMLElement) {
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function MarkdownImportControls({
+  importMarkdownOnly,
+  importAssetsForPendingMarkdown,
+  assetImportInputRef,
+}: {
+  importMarkdownOnly: (files: FileList | null) => Promise<void>;
+  importAssetsForPendingMarkdown: (files: FileList | null) => Promise<void>;
+  assetImportInputRef: React.MutableRefObject<HTMLInputElement | null>;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <label title="导入 Markdown" className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-600">
+        <input
+          type="file"
+          className="hidden"
+          accept=".md,.markdown"
+          onChange={async (e) => {
+            try {
+              await importMarkdownOnly(e.target.files);
+            } catch (error) {
+              alert(error instanceof Error ? error.message : "导入失败");
+            } finally {
+              e.currentTarget.value = "";
+            }
+          }}
+        />
+        <UploadCloud className="h-4 w-4" />
+        导入
+      </label>
+      <label title="选择图片所在文件夹" className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-600">
+        <input
+          ref={assetImportInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+          onChange={async (e) => {
+            try {
+              await importAssetsForPendingMarkdown(e.target.files);
+            } catch (error) {
+              alert(error instanceof Error ? error.message : "导入失败");
+            } finally {
+              e.currentTarget.value = "";
+            }
+          }}
+        />
+        <Folder className="h-4 w-4" />
+        图片位置
+      </label>
+    </div>
   );
 }
 
@@ -1190,50 +2345,174 @@ function DocsManager({
   onNewChild,
   onEdit,
   onDelete,
+  onMove,
+  editorActive,
+  activeDocId,
+  editingDocIsFolder,
+  formTitle,
+  setFormTitle,
+  formContent,
+  setFormContent,
+  onSave,
+  saving,
+  canSave,
+  importMarkdownOnly,
+  importAssetsForPendingMarkdown,
+  assetImportInputRef,
+  pendingMarkdownImport,
 }: {
   docs: DocNode[];
   onNewRoot: (isFolder: boolean) => void;
   onNewChild: (parentId: string, isFolder: boolean) => void;
   onEdit: (node: DocNode) => void;
   onDelete: (node: DocNode) => void;
+  onMove: (payload: { movedId: string; newParentId: string | null; oldSiblingIds: string[]; newSiblingIds: string[] }) => void;
+  editorActive: boolean;
+  activeDocId: string | null;
+  editingDocIsFolder: boolean;
+  formTitle: string;
+  setFormTitle: (value: string) => void;
+  formContent: string;
+  setFormContent: (value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  canSave: boolean;
+  importMarkdownOnly: (files: FileList | null) => Promise<void>;
+  importAssetsForPendingMarkdown: (files: FileList | null) => Promise<void>;
+  assetImportInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  pendingMarkdownImport: { markdown: string; markdownFile: File; imagePaths: string[] } | null;
 }) {
-  return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">面经文档库</h1>
-          <p className="text-gray-500">管理多层级的知识体系目录与文档内容</p>
-        </div>
-        <div className="flex gap-3">
-          <button onClick={() => onNewRoot(true)} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors">
-            <FolderPlus className="w-5 h-5" /> 新建顶级目录
-          </button>
-          <button onClick={() => onNewRoot(false)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors">
-            <FilePlus className="w-5 h-5" /> 新建顶级文档
-          </button>
-        </div>
-      </div>
+  const dragIdRef = useRef<string | null>(null);
+  const [dropHint, setDropHint] = useState<{ targetId: string; position: DocDropPosition } | null>(null);
+  const [query, setQuery] = useState("");
+  const flattenedDocs = flattenDocs(docs);
+  const activeTrail = flattenedDocs.find(({ node }) => node.id === activeDocId)?.trail ?? [];
+  const visibleDocs = query.trim()
+    ? flattenedDocs.filter(({ node, trail }) => `${trail.join(" ")} ${node.content ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()))
+    : [];
 
-      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-4">
-        {docs.length === 0 ? (
-          <div className="p-12 text-center text-gray-400">
-            <BookOpen className="w-12 h-12 text-gray-200 mx-auto mb-4" />
-            <p>暂无面经内容，点击右上角新建目录或文档</p>
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {docs.map((node) => (
-              <DocTreeNode
-                key={node.id}
-                node={node}
-                level={0}
-                onNewChild={onNewChild}
-                onEdit={onEdit}
-                onDelete={onDelete}
-              />
-            ))}
-          </div>
-        )}
+  const handleDrop = (targetNode: DocNode, targetParentId: string | null, targetSiblings: DocNode[], position: DocDropPosition) => {
+    const draggedId = dragIdRef.current;
+    dragIdRef.current = null;
+    setDropHint(null);
+    if (!draggedId || draggedId === targetNode.id) return;
+
+    const draggedInfo = findDocParentInfo(docs, draggedId);
+    if (!draggedInfo) return;
+    if (draggedInfo.node.isFolder && isDocDescendant(draggedInfo.node, targetNode.id)) return;
+
+    const oldSiblingIds = withoutDocId(draggedInfo.siblings, draggedId).map((node) => node.id);
+    if (position === "inside") {
+      if (!targetNode.isFolder) return;
+      const existingChildren = withoutDocId(targetNode.children ?? [], draggedId).map((node) => node.id);
+      onMove({
+        movedId: draggedId,
+        newParentId: targetNode.id,
+        oldSiblingIds,
+        newSiblingIds: [...existingChildren, draggedId],
+      });
+      return;
+    }
+
+    const targetSiblingIds = insertDocId(targetSiblings.map((node) => node.id), draggedId, targetNode.id, position);
+    onMove({
+      movedId: draggedId,
+      newParentId: targetParentId,
+      oldSiblingIds,
+      newSiblingIds: targetSiblingIds,
+    });
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-[calc(100vh-4rem)]">
+      <div className="h-full overflow-hidden rounded-2xl border border-slate-200 bg-[#f4fbfb] shadow-sm">
+        <div className="grid h-full grid-cols-[360px_minmax(0,1fr)]">
+          <aside className="flex min-h-0 flex-col border-r border-slate-200 bg-white/80">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h1 className="text-base font-bold text-slate-900">面经文档库</h1>
+                  <p className="text-xs text-slate-400">{countDocs(docs)} 篇文档</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => onNewRoot(true)} title="新建顶级目录" className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-teal-50 hover:text-teal-600">
+                    <FolderPlus className="h-4 w-4" />
+                  </button>
+                  <button onClick={() => onNewRoot(false)} title="新建顶级文档" className="rounded-lg bg-teal-500 p-2 text-white transition-colors hover:bg-teal-600">
+                    <FilePlus className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-400">
+                <Search className="h-4 w-4" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                  placeholder="搜索目录、文档..."
+                />
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 custom-scrollbar">
+              {docs.length === 0 ? (
+                <div className="px-4 py-12 text-center text-sm text-slate-400">暂无面经内容</div>
+              ) : query.trim() ? (
+                <div className="space-y-1">
+                  {visibleDocs.map(({ node, trail }) => (
+                    <button
+                      key={node.id}
+                      onClick={() => onEdit(node)}
+                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                        activeDocId === node.id ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {node.isFolder ? <Folder className="h-4 w-4 shrink-0 text-teal-500" /> : <FileText className="h-4 w-4 shrink-0 text-slate-400" />}
+                      <span className="min-w-0 flex-1 truncate">{trail.join(" / ")}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {docs.map((node) => (
+                    <DocTreeNode
+                      key={node.id}
+                      node={node}
+                      siblings={docs}
+                      parentId={null}
+                      level={0}
+                      activeDocId={activeDocId}
+                      dragIdRef={dragIdRef}
+                      dropHint={dropHint}
+                      setDropHint={setDropHint}
+                      onDropNode={handleDrop}
+                      onNewChild={onNewChild}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </aside>
+
+          <MarkdownWorkspaceEditor
+            kind="doc"
+            active={editorActive}
+            title={formTitle}
+            setTitle={setFormTitle}
+            content={formContent}
+            setContent={setFormContent}
+            breadcrumb={activeTrail.join(" / ")}
+            onSave={onSave}
+            saving={saving}
+            canSave={canSave}
+            importMarkdownOnly={importMarkdownOnly}
+            importAssetsForPendingMarkdown={importAssetsForPendingMarkdown}
+            assetImportInputRef={assetImportInputRef}
+            pendingMarkdownImport={pendingMarkdownImport}
+          />
+        </div>
       </div>
     </motion.div>
   );
@@ -1241,36 +2520,90 @@ function DocsManager({
 
 function DocTreeNode({
   node,
+  siblings,
+  parentId,
   level,
+  activeDocId,
+  dragIdRef,
+  dropHint,
+  setDropHint,
+  onDropNode,
   onNewChild,
   onEdit,
   onDelete,
 }: {
   node: DocNode;
+  siblings: DocNode[];
+  parentId: string | null;
   level: number;
+  activeDocId: string | null;
+  dragIdRef: React.MutableRefObject<string | null>;
+  dropHint: { targetId: string; position: DocDropPosition } | null;
+  setDropHint: (hint: { targetId: string; position: DocDropPosition } | null) => void;
+  onDropNode: (targetNode: DocNode, targetParentId: string | null, targetSiblings: DocNode[], position: DocDropPosition) => void;
   onNewChild: (parentId: string, isFolder: boolean) => void;
   onEdit: (node: DocNode) => void;
   onDelete: (node: DocNode) => void;
 }) {
   const [open, setOpen] = useState(level === 0);
   const [confirming, setConfirming] = useState(false);
+  const activeDrop = dropHint?.targetId === node.id ? dropHint.position : null;
+  const selected = activeDocId === node.id;
+
+  const getDropPosition = (e: React.DragEvent<HTMLDivElement>): DocDropPosition => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = (e.clientY - rect.top) / rect.height;
+    if (node.isFolder && ratio > 0.25 && ratio < 0.75) return "inside";
+    return ratio < 0.5 ? "before" : "after";
+  };
 
   return (
-    <div>
+    <div className="relative">
+      {activeDrop === "before" && <div className="absolute left-2 right-2 top-0 h-0.5 rounded-full bg-indigo-500" />}
       <div
-        className="group flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-gray-50 transition-colors"
+        draggable
+        onDragStart={() => { dragIdRef.current = node.id; }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const draggedId = dragIdRef.current;
+          if (!draggedId || draggedId === node.id) return;
+          const position = getDropPosition(e);
+          setDropHint({ targetId: node.id, position });
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDropNode(node, parentId, siblings, activeDrop ?? getDropPosition(e));
+        }}
+        onDragLeave={(e) => {
+          e.stopPropagation();
+          if (dropHint?.targetId === node.id) setDropHint(null);
+        }}
+        onDragEnd={() => {
+          dragIdRef.current = null;
+          setDropHint(null);
+        }}
+        className={`group flex items-center gap-2 py-2 px-2 rounded-lg transition-colors cursor-grab active:cursor-grabbing ${
+          activeDrop === "inside"
+            ? "bg-teal-50 ring-2 ring-teal-200"
+            : selected
+            ? "bg-teal-50 text-teal-700 ring-1 ring-teal-100"
+            : "hover:bg-slate-50"
+        }`}
         style={{ paddingLeft: `${level * 20 + 8}px` }}
       >
+        <GripVertical className="w-4 h-4 text-gray-300 shrink-0" />
         {node.isFolder ? (
           <button onClick={() => setOpen(!open)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
             {open ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
             <Folder className="w-4 h-4 text-teal-600 shrink-0" />
-            <span className="text-sm font-medium text-gray-700 truncate">{node.title}</span>
+            <span className={`text-sm font-medium truncate ${selected ? "text-teal-700" : "text-slate-700"}`}>{node.title}</span>
           </button>
         ) : (
           <button onClick={() => onEdit(node)} className="flex items-center gap-2 flex-1 min-w-0 text-left pl-6">
-            <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-            <span className="text-sm text-gray-600 truncate">{node.title}</span>
+            <FileText className={`w-3.5 h-3.5 shrink-0 ${selected ? "text-teal-500" : "text-gray-400"}`} />
+            <span className={`text-sm truncate ${selected ? "font-semibold text-teal-700" : "text-gray-600"}`}>{node.title}</span>
           </button>
         )}
 
@@ -1312,6 +2645,7 @@ function DocTreeNode({
           </div>
         )}
       </div>
+      {activeDrop === "after" && <div className="absolute left-2 right-2 bottom-0 h-0.5 rounded-full bg-indigo-500" />}
 
       {node.isFolder && open && node.children && node.children.length > 0 && (
         <div>
@@ -1319,7 +2653,14 @@ function DocTreeNode({
             <DocTreeNode
               key={child.id}
               node={child}
+              siblings={node.children ?? []}
+              parentId={node.id}
               level={level + 1}
+              activeDocId={activeDocId}
+              dragIdRef={dragIdRef}
+              dropHint={dropHint}
+              setDropHint={setDropHint}
+              onDropNode={onDropNode}
               onNewChild={onNewChild}
               onEdit={onEdit}
               onDelete={onDelete}

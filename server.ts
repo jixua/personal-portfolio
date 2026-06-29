@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import multer from "multer";
-import { knowledgeDocs, experiences as seedExperiences, projects as seedProjects } from "./src/data";
+import { knowledgeDocs } from "./src/data";
 
 // Create /data dir if it doesn't exist
 const dataDir = path.join(process.cwd(), "data");
@@ -92,25 +92,34 @@ const projectMigrations = [
   "ALTER TABLE projects ADD COLUMN period TEXT",
   "ALTER TABLE projects ADD COLUMN overview TEXT",
   "ALTER TABLE projects ADD COLUMN stack TEXT",
+  "ALTER TABLE projects ADD COLUMN sortOrder INTEGER",
+  "ALTER TABLE posts ADD COLUMN sortOrder INTEGER",
+  "ALTER TABLE docs ADD COLUMN sortOrder INTEGER",
 ];
 for (const sql of projectMigrations) {
   try { sqlite.exec(sql); } catch {}
 }
+
+sqlite.exec(`
+  UPDATE projects SET sortOrder = id WHERE sortOrder IS NULL;
+  UPDATE posts SET sortOrder = id WHERE sortOrder IS NULL;
+  UPDATE docs SET sortOrder = id WHERE sortOrder IS NULL;
+`);
 
 // 首次启动时，把 data.ts 中的静态面经数据种入 docs 表，方便后台直接管理
 function seedDocs() {
   const row = sqlite.prepare("SELECT COUNT(*) AS c FROM docs").get() as { c: number };
   if (row.c > 0) return;
   const insert = sqlite.prepare(
-    "INSERT INTO docs (parentId, title, isFolder, content) VALUES (?, ?, ?, ?)"
+    "INSERT INTO docs (parentId, title, isFolder, content, sortOrder) VALUES (?, ?, ?, ?, ?)"
   );
   const walk = (nodes: typeof knowledgeDocs, parentId: number | null) => {
-    for (const n of nodes) {
-      const info = insert.run(parentId, n.title, n.isFolder ? 1 : 0, n.content ?? null);
+    nodes.forEach((n, index) => {
+      const info = insert.run(parentId, n.title, n.isFolder ? 1 : 0, n.content ?? null, index + 1);
       if (n.children && n.children.length > 0) {
         walk(n.children, Number(info.lastInsertRowid));
       }
-    }
+    });
   };
   const seedAll = sqlite.transaction(() => walk(knowledgeDocs, null));
   seedAll();
@@ -120,11 +129,12 @@ seedDocs();
 // 把扁平的 docs 行组装成嵌套树（id 转为 string 以匹配前端 DocNode）
 function buildDocTree(parentId: number | null): any[] {
   const rows = (parentId === null
-    ? sqlite.prepare("SELECT * FROM docs WHERE parentId IS NULL ORDER BY id").all()
-    : sqlite.prepare("SELECT * FROM docs WHERE parentId = ? ORDER BY id").all(parentId)
+    ? sqlite.prepare("SELECT * FROM docs WHERE parentId IS NULL ORDER BY sortOrder, id").all()
+    : sqlite.prepare("SELECT * FROM docs WHERE parentId = ? ORDER BY sortOrder, id").all(parentId)
   ) as any[];
   return rows.map((r) => ({
     id: String(r.id),
+    sortOrder: r.sortOrder ?? undefined,
     title: r.title,
     isFolder: !!r.isFolder,
     content: r.content ?? undefined,
@@ -138,46 +148,6 @@ function deleteDocRecursive(id: number) {
   for (const c of children) deleteDocRecursive(c.id);
   sqlite.prepare("DELETE FROM docs WHERE id = ?").run(id);
 }
-
-// 首次启动时，把 data.ts 中的静态实践历程种入 experiences 表
-function seedExperiencesData() {
-  const row = sqlite.prepare("SELECT COUNT(*) AS c FROM experiences").get() as { c: number };
-  if (row.c > 0) return;
-  const insert = sqlite.prepare(
-    "INSERT INTO experiences (company, role, date, description, achievements, techStack) VALUES (?, ?, ?, ?, ?, ?)"
-  );
-  const tx = sqlite.transaction(() => {
-    for (const e of seedExperiences) {
-      insert.run(e.company, e.role, e.date, e.description, JSON.stringify(e.achievements), JSON.stringify(e.techStack));
-    }
-  });
-  tx();
-}
-seedExperiencesData();
-
-// 首次启动时，把 data.ts 中的静态项目数据种入 projects 表
-function seedProjectsData() {
-  const row = sqlite.prepare("SELECT COUNT(*) AS c FROM projects").get() as { c: number };
-  if (row.c > 0) return;
-  const insert = sqlite.prepare(
-    "INSERT INTO projects (num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  );
-  const tx = sqlite.transaction(() => {
-    for (const p of seedProjects) {
-      insert.run(
-        p.num ?? null, p.title, p.subtitle ?? null, p.description,
-        p.longDescription ?? null, p.overview ?? null,
-        p.category ?? null, p.role ?? null, p.period ?? null,
-        JSON.stringify(p.features ?? []),
-        JSON.stringify(p.tags),
-        JSON.stringify(p.stack ?? []),
-        p.imageUrl, p.link ?? null, p.github ?? null,
-      );
-    }
-  });
-  tx();
-}
-seedProjectsData();
 
 // 预置唯一管理员账号，并清理其他历史账号（注册已关闭，仅此账号可登录）
 // 可通过环境变量 ADMIN_EMAIL / ADMIN_PASSWORD 覆盖默认值
@@ -194,6 +164,44 @@ function seedAdmin() {
 seedAdmin();
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key_12345";
+
+function nextSortOrder(table: "projects" | "posts" | "docs", parentId?: number | null) {
+  const row = table === "docs"
+    ? sqlite.prepare(
+      parentId == null
+        ? "SELECT COALESCE(MAX(sortOrder), 0) + 1 AS next FROM docs WHERE parentId IS NULL"
+        : "SELECT COALESCE(MAX(sortOrder), 0) + 1 AS next FROM docs WHERE parentId = ?"
+    ).get(...(parentId == null ? [] : [parentId])) as { next: number }
+    : sqlite.prepare(`SELECT COALESCE(MAX(sortOrder), 0) + 1 AS next FROM ${table}`).get() as { next: number };
+  return row.next;
+}
+
+function updateSortOrder(table: "projects" | "posts" | "docs", ids: unknown[]) {
+  const numericIds = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+  if (numericIds.length !== ids.length) return false;
+  const update = sqlite.prepare(`UPDATE ${table} SET sortOrder = ? WHERE id = ?`);
+  const tx = sqlite.transaction(() => {
+    numericIds.forEach((id, index) => update.run(index + 1, id));
+  });
+  tx();
+  return true;
+}
+
+function isDescendantDoc(parentId: number, possibleChildId: number): boolean {
+  const children = sqlite.prepare("SELECT id FROM docs WHERE parentId = ?").all(parentId) as { id: number }[];
+  for (const child of children) {
+    if (child.id === possibleChildId || isDescendantDoc(child.id, possibleChildId)) return true;
+  }
+  return false;
+}
+
+function updateDocSiblingOrder(ids: unknown[]) {
+  const numericIds = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+  if (numericIds.length !== ids.length) return false;
+  const update = sqlite.prepare("UPDATE docs SET sortOrder = ? WHERE id = ?");
+  numericIds.forEach((id, index) => update.run(index + 1, id));
+  return true;
+}
 
 function requireAuth(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
@@ -269,8 +277,15 @@ async function startServer() {
 
   // Projects API
   app.get("/api/projects", (req, res) => {
-    const list = sqlite.prepare("SELECT * FROM projects").all();
+    const list = sqlite.prepare("SELECT * FROM projects ORDER BY sortOrder, id").all();
     res.json(list);
+  });
+
+  app.put("/api/projects/reorder", requireAuth, (req, res) => {
+    if (!Array.isArray(req.body.ids) || !updateSortOrder("projects", req.body.ids)) {
+      return res.status(400).json({ error: "Invalid ids" });
+    }
+    res.json({ ok: true });
   });
 
   app.get("/api/projects/:id", (req, res) => {
@@ -282,8 +297,8 @@ async function startServer() {
   app.post("/api/projects", requireAuth, (req, res) => {
     const { num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github } = req.body;
     const info = sqlite.prepare(
-      "INSERT INTO projects (num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github);
+      "INSERT INTO projects (num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github, nextSortOrder("projects"));
     res.json({ id: info.lastInsertRowid });
   });
 
@@ -302,13 +317,20 @@ async function startServer() {
 
   // Posts API
   app.get("/api/posts", (req, res) => {
-    const list = sqlite.prepare("SELECT * FROM posts").all();
+    const list = sqlite.prepare("SELECT * FROM posts ORDER BY sortOrder, id").all();
     res.json(list);
+  });
+
+  app.put("/api/posts/reorder", requireAuth, (req, res) => {
+    if (!Array.isArray(req.body.ids) || !updateSortOrder("posts", req.body.ids)) {
+      return res.status(400).json({ error: "Invalid ids" });
+    }
+    res.json({ ok: true });
   });
 
   app.post("/api/posts", requireAuth, (req, res) => {
     const { title, snippet, date, readTime, content } = req.body;
-    const info = sqlite.prepare("INSERT INTO posts (title, snippet, date, readTime, content) VALUES (?, ?, ?, ?, ?)").run(title, snippet, date, readTime, content);
+    const info = sqlite.prepare("INSERT INTO posts (title, snippet, date, readTime, content, sortOrder) VALUES (?, ?, ?, ?, ?, ?)").run(title, snippet, date, readTime, content, nextSortOrder("posts"));
     res.json({ id: info.lastInsertRowid });
   });
 
@@ -334,9 +356,46 @@ async function startServer() {
       return res.status(400).json({ error: "标题不能为空" });
     }
     const info = sqlite.prepare(
-      "INSERT INTO docs (parentId, title, isFolder, content) VALUES (?, ?, ?, ?)"
-    ).run(parentId ?? null, title, isFolder ? 1 : 0, isFolder ? null : (content ?? ""));
+      "INSERT INTO docs (parentId, title, isFolder, content, sortOrder) VALUES (?, ?, ?, ?, ?)"
+    ).run(parentId ?? null, title, isFolder ? 1 : 0, isFolder ? null : (content ?? ""), nextSortOrder("docs", parentId ?? null));
     res.json({ id: info.lastInsertRowid });
+  });
+
+  app.put("/api/docs/reorder", requireAuth, (req, res) => {
+    if (!Array.isArray(req.body.ids) || !updateSortOrder("docs", req.body.ids)) {
+      return res.status(400).json({ error: "Invalid ids" });
+    }
+    res.json({ ok: true });
+  });
+
+  app.put("/api/docs/move", requireAuth, (req, res) => {
+    const movedId = Number(req.body.movedId);
+    const newParentId = req.body.newParentId == null ? null : Number(req.body.newParentId);
+    const oldSiblingIds = Array.isArray(req.body.oldSiblingIds) ? req.body.oldSiblingIds : [];
+    const newSiblingIds = Array.isArray(req.body.newSiblingIds) ? req.body.newSiblingIds : [];
+    if (!Number.isFinite(movedId) || (newParentId !== null && !Number.isFinite(newParentId))) {
+      return res.status(400).json({ error: "Invalid move target" });
+    }
+    if (newParentId !== null) {
+      const parent = sqlite.prepare("SELECT id, isFolder FROM docs WHERE id = ?").get(newParentId) as any;
+      if (!parent || !parent.isFolder) return res.status(400).json({ error: "Target parent must be a folder" });
+      if (newParentId === movedId || isDescendantDoc(movedId, newParentId)) {
+        return res.status(400).json({ error: "Cannot move a folder into itself" });
+      }
+    }
+
+    const tx = sqlite.transaction(() => {
+      sqlite.prepare("UPDATE docs SET parentId = ? WHERE id = ?").run(newParentId, movedId);
+      if (!updateDocSiblingOrder(oldSiblingIds)) throw new Error("Invalid old sibling ids");
+      if (!updateDocSiblingOrder(newSiblingIds)) throw new Error("Invalid new sibling ids");
+    });
+
+    try {
+      tx();
+      res.json({ ok: true });
+    } catch {
+      res.status(400).json({ error: "Invalid ids" });
+    }
   });
 
   app.put("/api/docs/:id", requireAuth, (req, res) => {
