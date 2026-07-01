@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Link } from "react-router-dom";
 import {
@@ -1970,6 +1970,7 @@ function LiveMarkdownEditor({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const sourceTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contentRef = useRef(content);
+  const pendingModeSwitchScrollTopRef = useRef<number | null>(null);
   const [isSourceEditing, setIsSourceEditing] = useState(false);
   const [tocCollapsed, setTocCollapsed] = useState(false);
   const [pasteUploadCount, setPasteUploadCount] = useState(0);
@@ -1979,13 +1980,22 @@ function LiveMarkdownEditor({
     contentRef.current = content;
   }, [content]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isSourceEditing) return;
     const textarea = sourceTextareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
     textarea.style.height = `${Math.max(textarea.scrollHeight, 620)}px`;
   }, [content, isSourceEditing]);
+
+  useLayoutEffect(() => {
+    const pendingScrollTop = pendingModeSwitchScrollTopRef.current;
+    const container = scrollContainerRef.current;
+    if (pendingScrollTop === null || !container) return;
+
+    container.scrollTop = pendingScrollTop;
+    pendingModeSwitchScrollTopRef.current = null;
+  }, [isSourceEditing]);
 
   const scrollToHeading = (id: string) => {
     const container = scrollContainerRef.current;
@@ -2003,6 +2013,12 @@ function LiveMarkdownEditor({
   const updateContent = (nextContent: string) => {
     contentRef.current = nextContent;
     setContent(nextContent);
+  };
+
+  const switchEditorMode = (nextIsSourceEditing: boolean) => {
+    if (nextIsSourceEditing === isSourceEditing) return;
+    pendingModeSwitchScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? 0;
+    setIsSourceEditing(nextIsSourceEditing);
   };
 
   const insertAtSelection = (textarea: HTMLTextAreaElement, markdown: string) => {
@@ -2060,13 +2076,13 @@ function LiveMarkdownEditor({
     <div className="grid min-h-0 flex-1 bg-[#f4fbfb]" style={{ gridTemplateColumns: tocCollapsed ? "minmax(0,1fr) 48px" : "minmax(0,1fr) 260px" }}>
       <div ref={scrollContainerRef} className="min-h-0 overflow-y-auto custom-scrollbar">
         <div className="mx-auto max-w-4xl px-8 py-8">
-          <div className="rounded-2xl border border-slate-200 bg-white/70 px-8 py-7 shadow-sm">
-            <div className="mb-5 flex items-center justify-between border-b border-slate-100 pb-4 text-xs font-bold uppercase tracking-wide text-slate-400">
+          <div className="rounded-2xl border border-slate-200 bg-white/70 shadow-sm">
+            <div className="sticky top-0 z-20 flex items-center justify-between rounded-t-2xl border-b border-slate-100 bg-white/95 px-8 py-4 text-xs font-bold uppercase tracking-wide text-slate-400 shadow-sm backdrop-blur">
               <span>{pasteUploadCount > 0 ? `正在上传 ${pasteUploadCount} 张图片` : isSourceEditing ? "Markdown Source" : "Rendered Preview"}</span>
               <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
                 <button
                   type="button"
-                  onClick={() => setIsSourceEditing(false)}
+                  onClick={() => switchEditorMode(false)}
                   className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
                     !isSourceEditing ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
                   }`}
@@ -2075,7 +2091,7 @@ function LiveMarkdownEditor({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsSourceEditing(true)}
+                  onClick={() => switchEditorMode(true)}
                   className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
                     isSourceEditing ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
                   }`}
@@ -2084,30 +2100,32 @@ function LiveMarkdownEditor({
                 </button>
               </div>
             </div>
-            {isSourceEditing ? (
-              <textarea
-                ref={sourceTextareaRef}
-                value={content}
-                onChange={(event) => {
-                  updateContent(event.target.value);
-                  event.currentTarget.style.height = "auto";
-                  event.currentTarget.style.height = `${Math.max(event.currentTarget.scrollHeight, 620)}px`;
-                }}
-                onPaste={handlePasteImages}
-                className="min-h-[620px] w-full resize-none overflow-hidden bg-transparent p-0 font-mono text-[15px] leading-8 text-slate-800 outline-none placeholder:text-slate-400 selection:bg-teal-100"
-                placeholder="输入 Markdown..."
-                spellCheck={false}
-              />
-            ) : (
-              <MarkdownRenderer
-                content={content || "> 开始编写内容..."}
-                className="admin-markdown-preview min-h-[620px]"
-                editableTables={{
-                  onAddColumn: (tableIndex) => setContent(addMarkdownTableColumn(content, tableIndex)),
-                  onAddRow: (tableIndex) => setContent(addMarkdownTableRow(content, tableIndex)),
-                }}
-              />
-            )}
+            <div className="px-8 py-7">
+              {isSourceEditing ? (
+                <textarea
+                  ref={sourceTextareaRef}
+                  value={content}
+                  onChange={(event) => {
+                    updateContent(event.target.value);
+                    event.currentTarget.style.height = "auto";
+                    event.currentTarget.style.height = `${Math.max(event.currentTarget.scrollHeight, 620)}px`;
+                  }}
+                  onPaste={handlePasteImages}
+                  className="min-h-[620px] w-full resize-none overflow-hidden bg-transparent p-0 font-mono text-[15px] leading-8 text-slate-800 outline-none placeholder:text-slate-400 selection:bg-teal-100"
+                  placeholder="输入 Markdown..."
+                  spellCheck={false}
+                />
+              ) : (
+                <MarkdownRenderer
+                  content={content || "> 开始编写内容..."}
+                  className="admin-markdown-preview min-h-[620px]"
+                  editableTables={{
+                    onAddColumn: (tableIndex) => setContent(addMarkdownTableColumn(content, tableIndex)),
+                    onAddRow: (tableIndex) => setContent(addMarkdownTableRow(content, tableIndex)),
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
