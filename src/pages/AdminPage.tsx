@@ -9,9 +9,11 @@ import {
 } from "lucide-react";
 import type { DocNode } from "../data";
 import { useData } from "../context/DataContext";
-import { extractMarkdownHeadings, slugifyMarkdownHeading } from "../lib/markdown";
+import { MarkdownRenderer } from "../components/MarkdownRenderer";
+import { extractMarkdownHeadings } from "../lib/markdown";
 
 type AdminTab = "overview" | "projects" | "blog" | "docs" | "experience";
+type UploadMarkdownAsset = (file: File) => Promise<string>;
 
 interface ApiProject {
   id: number;
@@ -22,6 +24,7 @@ interface ApiProject {
   description: string | null;
   longDescription: string | null;
   overview: string | null;
+  detail: string | null;
   category: string | null;
   role: string | null;
   period: string | null;
@@ -258,6 +261,8 @@ export function AdminPage() {
   const [formCategory, setFormCategory] = useState("");
   const [formPeriod, setFormPeriod] = useState("");
   const [formOverview, setFormOverview] = useState("");
+  const [formDetail, setFormDetail] = useState("");
+  const formDetailRef = useRef<HTMLTextAreaElement | null>(null);
   const [formLongDescription, setFormLongDescription] = useState("");
   const [formFeatureRows, setFormFeatureRows] = useState<FeatureRow[]>([]);
   const dragIndexRef = useRef<number | null>(null);
@@ -341,6 +346,7 @@ export function AdminPage() {
     setFormCategory("");
     setFormPeriod("");
     setFormOverview("");
+    setFormDetail("");
     setFormLongDescription("");
     setFormFeatureRows([]);
     setFormTags("");
@@ -369,6 +375,7 @@ export function AdminPage() {
       setFormDescription(p.description ?? "");
       setFormPeriod(p.period ?? "");
       setFormOverview(p.overview ?? "");
+      setFormDetail(p.detail ?? "");
       setFormLongDescription(p.longDescription ?? "");
       // parse features — support both string[] and {title,detail,doc}[]
       if (p.features) {
@@ -417,6 +424,18 @@ export function AdminPage() {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     };
+    const saveJson = async (url: string, init: RequestInit) => {
+      const response = await fetch(url, init);
+      if (!response.ok) {
+        let message = "保存失败";
+        try {
+          const data = await response.json();
+          message = data?.error || message;
+        } catch {}
+        throw new Error(message);
+      }
+      return response;
+    };
     try {
       if (editingContext.type === "project") {
         const tags = formTags.split(",").map((s) => s.trim()).filter(Boolean);
@@ -430,6 +449,7 @@ export function AdminPage() {
           description: formDescription,
           longDescription: formLongDescription,
           overview: formOverview,
+          detail: formDetail,
           role: formRole,
           period: formPeriod,
           features: JSON.stringify(features),
@@ -440,14 +460,14 @@ export function AdminPage() {
           github: formGithub,
         };
         if (editingContext.item) {
-          await fetch(`/api/projects/${(editingContext.item as ApiProject).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+          await saveJson(`/api/projects/${(editingContext.item as ApiProject).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
         } else {
-          await fetch("/api/projects", { method: "POST", headers, body: JSON.stringify(body) });
+          await saveJson("/api/projects", { method: "POST", headers, body: JSON.stringify(body) });
         }
       } else if (editingContext.type === "doc") {
         if (editingContext.item) {
           const body = { title: formTitle, content: formContent };
-          await fetch(`/api/docs/${(editingContext.item as DocNode).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+          await saveJson(`/api/docs/${(editingContext.item as DocNode).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
         } else {
           const body = {
             parentId: editingContext.parentId ?? null,
@@ -455,7 +475,7 @@ export function AdminPage() {
             isFolder: editingContext.isFolder ?? false,
             content: formContent,
           };
-          await fetch("/api/docs", { method: "POST", headers, body: JSON.stringify(body) });
+          await saveJson("/api/docs", { method: "POST", headers, body: JSON.stringify(body) });
         }
       } else if (editingContext.type === "experience") {
         const achievements = formAchievements.split("\n").map((s) => s.trim()).filter(Boolean);
@@ -469,20 +489,22 @@ export function AdminPage() {
           techStack: JSON.stringify(techStack),
         };
         if (editingContext.item) {
-          await fetch(`/api/experiences/${(editingContext.item as ApiExperience).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+          await saveJson(`/api/experiences/${(editingContext.item as ApiExperience).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
         } else {
-          await fetch("/api/experiences", { method: "POST", headers, body: JSON.stringify(body) });
+          await saveJson("/api/experiences", { method: "POST", headers, body: JSON.stringify(body) });
         }
       } else {
         const body = { title: formTitle, snippet: formSnippet, date: formDate, readTime: formReadTime, content: formContent };
         if (editingContext.item) {
-          await fetch(`/api/posts/${(editingContext.item as ApiPost).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+          await saveJson(`/api/posts/${(editingContext.item as ApiPost).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
         } else {
-          await fetch("/api/posts", { method: "POST", headers, body: JSON.stringify(body) });
+          await saveJson("/api/posts", { method: "POST", headers, body: JSON.stringify(body) });
         }
       }
       await refreshAllData();
       setEditingContext(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "保存失败");
     } finally {
       setSaving(false);
     }
@@ -549,6 +571,49 @@ export function AdminPage() {
     const data = await res.json();
     if (!data.url) throw new Error(`上传失败：${file.name}`);
     return data.url as string;
+  };
+
+  const insertProjectDetailMarkdown = (markdown: string) => {
+    const textarea = formDetailRef.current;
+    if (!textarea) {
+      setFormDetail((value) => `${value}${value.endsWith("\n") || value.length === 0 ? "" : "\n\n"}${markdown}`);
+      return;
+    }
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = formDetail.slice(0, start);
+    const after = formDetail.slice(end);
+    const prefix = before.length === 0 || before.endsWith("\n") ? "" : "\n\n";
+    const suffix = after.length === 0 || after.startsWith("\n") ? "" : "\n\n";
+    const next = `${before}${prefix}${markdown}${suffix}${after}`;
+    const cursor = before.length + prefix.length + markdown.length;
+    setFormDetail(next);
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
+    });
+  };
+
+  const importProjectDetailImages = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) {
+      alert("请选择图片文件");
+      return;
+    }
+
+    try {
+      const markdownItems = await Promise.all(
+        imageFiles.map(async (file) => {
+          const url = await uploadMarkdownAsset(file);
+          return `![${file.name.replace(/\.[^.]+$/, "")}](${url})`;
+        }),
+      );
+      insertProjectDetailMarkdown(markdownItems.join("\n\n"));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "图片上传失败");
+    }
   };
 
   const resolveMarkdownAssets = async (
@@ -781,6 +846,7 @@ export function AdminPage() {
               canSave={!!editingContext && editingContext.type === "blog" && !!formTitle.trim()}
               importMarkdownOnly={importMarkdownOnly}
               importAssetsForPendingMarkdown={importAssetsForPendingMarkdown}
+              uploadMarkdownAsset={uploadMarkdownAsset}
               assetImportInputRef={assetImportInputRef}
               pendingMarkdownImport={pendingMarkdownImport}
             />
@@ -807,6 +873,7 @@ export function AdminPage() {
               canSave={!!editingContext && editingContext.type === "doc" && !editingDocIsFolder && !!formTitle.trim()}
               importMarkdownOnly={importMarkdownOnly}
               importAssetsForPendingMarkdown={importAssetsForPendingMarkdown}
+              uploadMarkdownAsset={uploadMarkdownAsset}
               assetImportInputRef={assetImportInputRef}
               pendingMarkdownImport={pendingMarkdownImport}
             />
@@ -1119,6 +1186,38 @@ export function AdminPage() {
                           </div>
                         ))}
                       </div>
+                    </div>
+
+                    {/* ── 详情介绍 ── */}
+                    <div>
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">详情介绍</label>
+                          <p className="text-xs text-gray-400 mt-0.5">对应详情页「核心功能」下方的 Markdown 内容，支持标题、列表、代码块、表格和图片</p>
+                        </div>
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors text-xs font-bold cursor-pointer shrink-0">
+                          <input
+                            type="file"
+                            className="hidden"
+                            accept="image/*"
+                            multiple
+                            onChange={async (e) => {
+                              await importProjectDetailImages(e.target.files);
+                              e.currentTarget.value = "";
+                            }}
+                          />
+                          <UploadCloud className="w-3.5 h-3.5" />
+                          导入图片
+                        </label>
+                      </div>
+                      <textarea
+                        ref={formDetailRef}
+                        value={formDetail}
+                        onChange={(e) => setFormDetail(e.target.value)}
+                        rows={10}
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-y text-sm font-mono leading-7"
+                        placeholder={"## 技术实现\n\n- 关键设计点\n- 复杂问题与解决方案\n\n```ts\n// code\n```"}
+                      />
                     </div>
 
                     {/* ── 标签与技术栈 ── */}
@@ -1528,6 +1627,7 @@ function BlogManager({
   canSave,
   importMarkdownOnly,
   importAssetsForPendingMarkdown,
+  uploadMarkdownAsset,
   assetImportInputRef,
   pendingMarkdownImport,
 }: {
@@ -1553,6 +1653,7 @@ function BlogManager({
   canSave: boolean;
   importMarkdownOnly: (files: FileList | null) => Promise<void>;
   importAssetsForPendingMarkdown: (files: FileList | null) => Promise<void>;
+  uploadMarkdownAsset: UploadMarkdownAsset;
   assetImportInputRef: React.MutableRefObject<HTMLInputElement | null>;
   pendingMarkdownImport: { markdown: string; markdownFile: File; imagePaths: string[] } | null;
 }) {
@@ -1650,6 +1751,7 @@ function BlogManager({
             canSave={canSave}
             importMarkdownOnly={importMarkdownOnly}
             importAssetsForPendingMarkdown={importAssetsForPendingMarkdown}
+            uploadMarkdownAsset={uploadMarkdownAsset}
             assetImportInputRef={assetImportInputRef}
             pendingMarkdownImport={pendingMarkdownImport}
           />
@@ -1678,6 +1780,7 @@ function MarkdownWorkspaceEditor({
   canSave,
   importMarkdownOnly,
   importAssetsForPendingMarkdown,
+  uploadMarkdownAsset,
   assetImportInputRef,
   pendingMarkdownImport,
 }: {
@@ -1699,6 +1802,7 @@ function MarkdownWorkspaceEditor({
   canSave: boolean;
   importMarkdownOnly: (files: FileList | null) => Promise<void>;
   importAssetsForPendingMarkdown: (files: FileList | null) => Promise<void>;
+  uploadMarkdownAsset: UploadMarkdownAsset;
   assetImportInputRef: React.MutableRefObject<HTMLInputElement | null>;
   pendingMarkdownImport: { markdown: string; markdownFile: File; imagePaths: string[] } | null;
 }) {
@@ -1779,73 +1883,58 @@ function MarkdownWorkspaceEditor({
         )}
       </header>
 
-      <LiveMarkdownEditor content={content} setContent={setContent} />
+      <LiveMarkdownEditor content={content} setContent={setContent} uploadMarkdownAsset={uploadMarkdownAsset} />
     </section>
   );
+}
+
+function getClipboardImageFiles(clipboardData: DataTransfer) {
+  const directFiles = Array.from(clipboardData.files).filter((file) => file.type.startsWith("image/"));
+  if (directFiles.length > 0) return directFiles;
+
+  return Array.from(clipboardData.items)
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file));
+}
+
+function getImageAltText(file: File, index: number) {
+  if (!file.name) return `clipboard-image-${index + 1}`;
+  return file.name.replace(/\.[^.]+$/, "") || `clipboard-image-${index + 1}`;
 }
 
 function LiveMarkdownEditor({
   content,
   setContent,
+  uploadMarkdownAsset,
 }: {
   content: string;
   setContent: (value: string) => void;
+  uploadMarkdownAsset: UploadMarkdownAsset;
 }) {
-  const editorRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const lastMarkdownRef = useRef<string>("");
+  const sourceTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const contentRef = useRef(content);
+  const [isSourceEditing, setIsSourceEditing] = useState(false);
   const [tocCollapsed, setTocCollapsed] = useState(false);
+  const [pasteUploadCount, setPasteUploadCount] = useState(0);
   const headings = useMemo(() => extractMarkdownHeadings(content, [1, 2, 3, 4]), [content]);
 
   useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor || lastMarkdownRef.current === content) return;
-    editor.innerHTML = markdownToEditableHtml(content);
-    lastMarkdownRef.current = content;
+    contentRef.current = content;
   }, [content]);
 
-  const syncMarkdown = () => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const markdown = editableHtmlToMarkdown(editor);
-    lastMarkdownRef.current = markdown;
-    setContent(markdown);
-  };
-
-  const handleShortcut = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== " ") return;
-    const selection = window.getSelection();
-    const node = selection?.anchorNode;
-    if (!node) return;
-    const block = getEditableBlock(node, editorRef.current);
-    if (!block) return;
-    const text = block.textContent?.trim() ?? "";
-    const heading = /^(#{1,6})$/.exec(text);
-    if (heading) {
-      event.preventDefault();
-      const level = heading[1].length;
-      const next = document.createElement(`h${level}`);
-      next.innerHTML = "<br>";
-      block.replaceWith(next);
-      placeCaretAtEnd(next);
-      syncMarkdown();
-      return;
-    }
-    if (text === "-" || text === "*") {
-      event.preventDefault();
-      const list = document.createElement("ul");
-      const item = document.createElement("li");
-      item.innerHTML = "<br>";
-      list.appendChild(item);
-      block.replaceWith(list);
-      placeCaretAtEnd(item);
-      syncMarkdown();
-    }
-  };
+  useEffect(() => {
+    if (!isSourceEditing) return;
+    const textarea = sourceTextareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.max(textarea.scrollHeight, 620)}px`;
+  }, [content, isSourceEditing]);
 
   const scrollToHeading = (id: string) => {
     const container = scrollContainerRef.current;
-    const target = editorRef.current?.querySelector(`[data-heading-id="${CSS.escape(id)}"]`);
+    const target = container?.querySelector(`#${CSS.escape(id)}`);
     if (!container || !(target instanceof HTMLElement)) return;
 
     const containerRect = container.getBoundingClientRect();
@@ -1856,42 +1945,114 @@ function LiveMarkdownEditor({
     });
   };
 
+  const updateContent = (nextContent: string) => {
+    contentRef.current = nextContent;
+    setContent(nextContent);
+  };
+
+  const insertAtSelection = (textarea: HTMLTextAreaElement, markdown: string) => {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const current = contentRef.current;
+    const before = current.slice(0, start);
+    const after = current.slice(end);
+    const prefix = before.length === 0 || before.endsWith("\n") ? "" : "\n\n";
+    const suffix = after.length === 0 || after.startsWith("\n") ? "" : "\n\n";
+    const next = `${before}${prefix}${markdown}${suffix}${after}`;
+    const cursor = before.length + prefix.length + markdown.length;
+    updateContent(next);
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.max(textarea.scrollHeight, 620)}px`;
+    });
+  };
+
+  const replaceFirstMarkdown = (search: string, replacement: string) => {
+    const current = contentRef.current;
+    const index = current.indexOf(search);
+    if (index === -1) return;
+    updateContent(`${current.slice(0, index)}${replacement}${current.slice(index + search.length)}`);
+  };
+
+  const handlePasteImages = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const images = getClipboardImageFiles(event.clipboardData);
+    if (images.length === 0) return;
+
+    event.preventDefault();
+    const placeholders = images.map((_, index) => `![图片上传中 ${index + 1}](uploading://clipboard-image-${Date.now()}-${index})`);
+    insertAtSelection(event.currentTarget, placeholders.join("\n\n"));
+    setPasteUploadCount((count) => count + images.length);
+
+    await Promise.all(
+      images.map(async (file, index) => {
+        const placeholder = placeholders[index];
+        try {
+          const url = await uploadMarkdownAsset(file);
+          replaceFirstMarkdown(placeholder, `![${getImageAltText(file, index)}](${url})`);
+        } catch (error) {
+          replaceFirstMarkdown(placeholder, `<!-- 图片上传失败：${file.name || `clipboard-image-${index + 1}`} -->`);
+          alert(error instanceof Error ? error.message : "图片上传失败");
+        } finally {
+          setPasteUploadCount((count) => Math.max(0, count - 1));
+        }
+      }),
+    );
+  };
+
   return (
     <div className="grid min-h-0 flex-1 bg-[#f4fbfb]" style={{ gridTemplateColumns: tocCollapsed ? "minmax(0,1fr) 48px" : "minmax(0,1fr) 260px" }}>
       <div ref={scrollContainerRef} className="min-h-0 overflow-y-auto custom-scrollbar">
         <div className="mx-auto max-w-4xl px-8 py-8">
           <div className="rounded-2xl border border-slate-200 bg-white/70 px-8 py-7 shadow-sm">
-          <div className="mb-5 flex items-center justify-between border-b border-slate-100 pb-4 text-xs font-bold uppercase tracking-wide text-slate-400">
-            <span>Live Preview</span>
-            <span>直接在正文中编辑</span>
-          </div>
-          <div
-            ref={editorRef}
-            contentEditable
-            suppressContentEditableWarning
-            onInput={syncMarkdown}
-            onClick={(event) => {
-              const target = event.target;
-              if (!(target instanceof HTMLElement)) return;
-              const action = target.closest<HTMLButtonElement>("[data-table-action]");
-              if (!action) return;
-              event.preventDefault();
-              const wrapper = action.closest<HTMLElement>("[data-md-table]");
-              if (!wrapper) return;
-              if (action.dataset.tableAction === "add-row") addEditableTableRow(wrapper);
-              if (action.dataset.tableAction === "add-column") addEditableTableColumn(wrapper);
-              syncMarkdown();
-            }}
-            onBlur={syncMarkdown}
-            onKeyDown={handleShortcut}
-            onPaste={(event) => {
-              event.preventDefault();
-              const text = event.clipboardData.getData("text/plain");
-              document.execCommand("insertText", false, text);
-            }}
-            className="typora-live-editor min-h-[620px] outline-none"
-            data-placeholder="开始编写内容..."
-          />
+            <div className="mb-5 flex items-center justify-between border-b border-slate-100 pb-4 text-xs font-bold uppercase tracking-wide text-slate-400">
+              <span>{pasteUploadCount > 0 ? `正在上传 ${pasteUploadCount} 张图片` : isSourceEditing ? "Markdown Source" : "Rendered Preview"}</span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+                <button
+                  type="button"
+                  onClick={() => setIsSourceEditing(false)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
+                    !isSourceEditing ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  预览
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSourceEditing(true)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
+                    isSourceEditing ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  源码
+                </button>
+              </div>
+            </div>
+            {isSourceEditing ? (
+              <textarea
+                ref={sourceTextareaRef}
+                value={content}
+                onChange={(event) => {
+                  updateContent(event.target.value);
+                  event.currentTarget.style.height = "auto";
+                  event.currentTarget.style.height = `${Math.max(event.currentTarget.scrollHeight, 620)}px`;
+                }}
+                onPaste={handlePasteImages}
+                className="min-h-[620px] w-full resize-none overflow-hidden bg-transparent p-0 font-mono text-[15px] leading-8 text-slate-800 outline-none placeholder:text-slate-400 selection:bg-teal-100"
+                placeholder="输入 Markdown..."
+                spellCheck={false}
+              />
+            ) : (
+              <MarkdownRenderer
+                content={content || "> 开始编写内容..."}
+                className="admin-markdown-preview min-h-[620px]"
+                editableTables={{
+                  onAddColumn: (tableIndex) => setContent(addMarkdownTableColumn(content, tableIndex)),
+                  onAddRow: (tableIndex) => setContent(addMarkdownTableRow(content, tableIndex)),
+                }}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -1949,77 +2110,35 @@ function AdminHeadingToc({
   );
 }
 
-function markdownToEditableHtml(markdown: string) {
+type MarkdownTableRange = {
+  start: number;
+  end: number;
+};
+
+function findMarkdownTables(markdown: string): MarkdownTableRange[] {
   const lines = markdown.split(/\r?\n/);
-  const html: string[] = [];
-  let inCode = false;
-  let codeLines: string[] = [];
-  const headingCounts = new Map<string, number>();
+  const tables: MarkdownTableRange[] = [];
+  let inFence = false;
 
-  const flushCode = () => {
-    html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-    codeLines = [];
-  };
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    if (/^\s*```/.test(lines[index])) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (!isMarkdownTableRow(lines[index]) || !isMarkdownTableSeparator(lines[index + 1])) continue;
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const rawLine = lines[index];
-    const line = rawLine.trimEnd();
-    if (/^```/.test(line.trim())) {
-      if (inCode) {
-        flushCode();
-        inCode = false;
-      } else {
-        inCode = true;
-      }
-      continue;
+    const start = index;
+    index += 2;
+    while (index < lines.length && isMarkdownTableRow(lines[index])) {
+      index += 1;
     }
-    if (inCode) {
-      codeLines.push(rawLine);
-      continue;
-    }
-    if (isMarkdownTableRow(line) && isMarkdownTableSeparator(lines[index + 1] ?? "")) {
-      const tableLines = [line, lines[index + 1]];
-      index += 2;
-      while (index < lines.length && isMarkdownTableRow(lines[index])) {
-        tableLines.push(lines[index]);
-        index += 1;
-      }
-      index -= 1;
-      html.push(markdownTableToEditableHtml(tableLines));
-      continue;
-    }
-    if (!line.trim()) {
-      html.push("<p><br></p>");
-      continue;
-    }
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (heading) {
-      const level = heading[1].length;
-      const headingText = stripEditableMarkdown(heading[2]);
-      const id = createEditableHeadingId(headingText, headingCounts);
-      html.push(`<h${level} id="${id}" data-heading-id="${id}">${inlineMarkdownToHtml(heading[2])}</h${level}>`);
-      continue;
-    }
-    const quote = /^>\s?(.*)$/.exec(line);
-    if (quote) {
-      html.push(`<blockquote>${inlineMarkdownToHtml(quote[1])}</blockquote>`);
-      continue;
-    }
-    const bullet = /^[-*]\s+(.+)$/.exec(line);
-    if (bullet) {
-      html.push(`<ul><li>${inlineMarkdownToHtml(bullet[1])}</li></ul>`);
-      continue;
-    }
-    const ordered = /^(\d+)\.\s+(.+)$/.exec(line);
-    if (ordered) {
-      html.push(`<ol start="${ordered[1]}"><li>${inlineMarkdownToHtml(ordered[2])}</li></ol>`);
-      continue;
-    }
-    html.push(`<p>${inlineMarkdownToHtml(line)}</p>`);
+    const end = index - 1;
+    tables.push({ start, end });
+    index = end;
   }
 
-  if (inCode) flushCode();
-  return html.join("") || "<p><br></p>";
+  return tables;
 }
 
 function isMarkdownTableRow(line: string) {
@@ -2037,191 +2156,41 @@ function splitMarkdownTableRow(line: string) {
   return trimmed.split("|").map((cell) => cell.trim());
 }
 
-function markdownTableToEditableHtml(lines: string[]) {
-  const headers = splitMarkdownTableRow(lines[0] ?? "");
-  const rows = lines.slice(2).map(splitMarkdownTableRow);
-  const columnCount = Math.max(headers.length, ...rows.map((row) => row.length), 1);
-  const normalizedHeaders = normalizeTableCells(headers, columnCount);
-  const normalizedRows = rows.map((row) => normalizeTableCells(row, columnCount));
-
-  return [
-    '<div class="md-table-wrapper" data-md-table contenteditable="false">',
-    "<table>",
-    "<thead><tr>",
-    normalizedHeaders.map((cell) => `<th contenteditable="true">${inlineMarkdownToHtml(cell) || "<br>"}</th>`).join(""),
-    "</tr></thead>",
-    "<tbody>",
-    normalizedRows.map((row) => `<tr>${row.map((cell) => `<td contenteditable="true">${inlineMarkdownToHtml(cell) || "<br>"}</td>`).join("")}</tr>`).join(""),
-    "</tbody>",
-    "</table>",
-    '<button type="button" class="md-table-add md-table-add-col" data-table-action="add-column" contenteditable="false" aria-label="在右方新增列">+</button>',
-    '<button type="button" class="md-table-add md-table-add-row" data-table-action="add-row" contenteditable="false" aria-label="在下方新增行">+</button>',
-    "</div>",
-  ].join("");
-}
-
 function normalizeTableCells(cells: string[], count: number) {
   return Array.from({ length: count }, (_, index) => cells[index] ?? "");
 }
 
-function inlineMarkdownToHtml(text: string) {
-  return escapeHtml(text)
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([\s\S]+?)\*\*/g, "<strong>$1</strong>");
+function formatMarkdownTableRow(cells: string[]) {
+  return `| ${cells.join(" | ")} |`;
 }
 
-function stripEditableMarkdown(value: string) {
-  return value
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\*\*([\s\S]+?)\*\*/g, "$1")
-    .replace(/<[^>]+>/g, "")
-    .trim();
-}
+function addMarkdownTableColumn(markdown: string, tableIndex: number) {
+  const lines = markdown.split(/\r?\n/);
+  const table = findMarkdownTables(markdown)[tableIndex];
+  if (!table) return markdown;
 
-function createEditableHeadingId(text: string, counts: Map<string, number>) {
-  const base = slugifyMarkdownHeading(text);
-  const count = counts.get(base) ?? 0;
-  counts.set(base, count + 1);
-  return count === 0 ? base : `${base}-${count}`;
-}
-
-function editableHtmlToMarkdown(root: HTMLElement) {
-  const lines: string[] = [];
-  root.childNodes.forEach((node) => {
-    if (!(node instanceof HTMLElement)) return;
-    const tag = node.tagName.toLowerCase();
-    if (/h[1-6]/.test(tag)) {
-      lines.push(`${"#".repeat(Number(tag[1]))} ${inlineHtmlToMarkdown(node)}`.trimEnd());
-    } else if (tag === "blockquote") {
-      lines.push(`> ${inlineHtmlToMarkdown(node)}`.trimEnd());
-    } else if (tag === "ul") {
-      node.querySelectorAll(":scope > li").forEach((li) => lines.push(`- ${inlineHtmlToMarkdown(li as HTMLElement)}`.trimEnd()));
-    } else if (tag === "ol") {
-      node.querySelectorAll(":scope > li").forEach((li, index) => lines.push(`${index + 1}. ${inlineHtmlToMarkdown(li as HTMLElement)}`.trimEnd()));
-    } else if (tag === "pre") {
-      lines.push("```");
-      lines.push(node.textContent ?? "");
-      lines.push("```");
-    } else if (node.matches("[data-md-table]")) {
-      lines.push(...editableTableToMarkdown(node));
-    } else if (tag === "table") {
-      lines.push(...editableTableToMarkdown(node));
-    } else {
-      lines.push(inlineHtmlToMarkdown(node));
-    }
-  });
-  return lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
-}
-
-function editableTableToMarkdown(root: HTMLElement) {
-  const table = root.tagName.toLowerCase() === "table" ? root : root.querySelector("table");
-  if (!table) return [];
-  const headerCells = Array.from(table.querySelectorAll("thead tr:first-child th")) as HTMLElement[];
-  const bodyRows = Array.from(table.querySelectorAll("tbody tr")) as HTMLTableRowElement[];
-  const fallbackFirstRow = headerCells.length === 0 ? Array.from(table.querySelectorAll("tr:first-child > *")) as HTMLElement[] : [];
-  const headers = (headerCells.length > 0 ? headerCells : fallbackFirstRow).map(tableCellToMarkdown);
-  const columnCount = Math.max(headers.length, ...bodyRows.map((row) => row.children.length), 1);
-  const normalizedHeaders = normalizeTableCells(headers, columnCount).map((cell, index) => cell || `列${index + 1}`);
-  const body = bodyRows.map((row) => normalizeTableCells(Array.from(row.children).map((cell) => tableCellToMarkdown(cell as HTMLElement)), columnCount));
-
-  return [
-    `| ${normalizedHeaders.join(" | ")} |`,
-    `| ${normalizedHeaders.map(() => "---").join(" | ")} |`,
-    ...body.map((row) => `| ${row.join(" | ")} |`),
-  ];
-}
-
-function tableCellToMarkdown(cell: HTMLElement) {
-  return inlineHtmlToMarkdown(cell)
-    .replace(/\n+/g, " ")
-    .replace(/\|/g, "\\|")
-    .trim();
-}
-
-function inlineHtmlToMarkdown(element: HTMLElement): string {
-  let output = "";
-  element.childNodes.forEach((child) => {
-    if (child instanceof HTMLElement && child.closest("[data-table-action]")) return;
-    if (child.nodeType === Node.TEXT_NODE) {
-      output += child.textContent ?? "";
-      return;
-    }
-    if (!(child instanceof HTMLElement)) return;
-    const tag = child.tagName.toLowerCase();
-    if (tag === "strong" || tag === "b") {
-      output += `**${inlineHtmlToMarkdown(child)}**`;
-    } else if (tag === "code") {
-      output += `\`${child.textContent ?? ""}\``;
-    } else if (tag === "br") {
-      output += "";
-    } else {
-      output += inlineHtmlToMarkdown(child);
-    }
-  });
-  return output;
-}
-
-function addEditableTableColumn(wrapper: HTMLElement) {
-  const table = wrapper.querySelector("table");
-  if (!table) return;
-  const headerRow = table.querySelector("thead tr") ?? table.querySelector("tr");
-  if (headerRow) {
-    const th = document.createElement("th");
-    th.contentEditable = "true";
-    th.innerHTML = "<br>";
-    headerRow.appendChild(th);
-    placeCaretAtEnd(th);
+  for (let index = table.start; index <= table.end; index += 1) {
+    const cells = splitMarkdownTableRow(lines[index]);
+    lines[index] = isMarkdownTableSeparator(lines[index])
+      ? formatMarkdownTableRow([...cells, "---"])
+      : formatMarkdownTableRow([...cells, ""]);
   }
-  table.querySelectorAll("tbody tr").forEach((row) => {
-    const td = document.createElement("td");
-    td.contentEditable = "true";
-    td.innerHTML = "<br>";
-    row.appendChild(td);
-  });
+
+  return lines.join("\n");
 }
 
-function addEditableTableRow(wrapper: HTMLElement) {
-  const table = wrapper.querySelector("table");
-  if (!table) return;
-  const tbody = table.querySelector("tbody") ?? table.appendChild(document.createElement("tbody"));
-  const columnCount = Math.max(table.querySelector("thead tr")?.children.length ?? 0, table.querySelector("tr")?.children.length ?? 1, 1);
-  const tr = document.createElement("tr");
-  for (let index = 0; index < columnCount; index += 1) {
-    const td = document.createElement("td");
-    td.contentEditable = "true";
-    td.innerHTML = "<br>";
-    tr.appendChild(td);
-  }
-  tbody.appendChild(tr);
-  placeCaretAtEnd(tr.firstElementChild as HTMLElement);
-}
+function addMarkdownTableRow(markdown: string, tableIndex: number) {
+  const lines = markdown.split(/\r?\n/);
+  const table = findMarkdownTables(markdown)[tableIndex];
+  if (!table) return markdown;
 
-function getEditableBlock(node: Node, root: HTMLElement | null) {
-  let current: Node | null = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
-  while (current && current !== root) {
-    if (current instanceof HTMLElement && /^(p|div|h[1-6]|blockquote|li)$/i.test(current.tagName)) {
-      return current;
-    }
-    current = current.parentNode;
-  }
-  return null;
-}
+  const columnCount = Math.max(
+    ...lines.slice(table.start, table.end + 1).map((line) => splitMarkdownTableRow(line).length),
+    1,
+  );
+  lines.splice(table.end + 1, 0, formatMarkdownTableRow(normalizeTableCells([], columnCount)));
 
-function placeCaretAtEnd(element: HTMLElement) {
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  range.collapse(false);
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return lines.join("\n");
 }
 
 function MarkdownImportControls({
@@ -2358,6 +2327,7 @@ function DocsManager({
   canSave,
   importMarkdownOnly,
   importAssetsForPendingMarkdown,
+  uploadMarkdownAsset,
   assetImportInputRef,
   pendingMarkdownImport,
 }: {
@@ -2379,6 +2349,7 @@ function DocsManager({
   canSave: boolean;
   importMarkdownOnly: (files: FileList | null) => Promise<void>;
   importAssetsForPendingMarkdown: (files: FileList | null) => Promise<void>;
+  uploadMarkdownAsset: UploadMarkdownAsset;
   assetImportInputRef: React.MutableRefObject<HTMLInputElement | null>;
   pendingMarkdownImport: { markdown: string; markdownFile: File; imagePaths: string[] } | null;
 }) {
@@ -2509,6 +2480,7 @@ function DocsManager({
             canSave={canSave}
             importMarkdownOnly={importMarkdownOnly}
             importAssetsForPendingMarkdown={importAssetsForPendingMarkdown}
+            uploadMarkdownAsset={uploadMarkdownAsset}
             assetImportInputRef={assetImportInputRef}
             pendingMarkdownImport={pendingMarkdownImport}
           />

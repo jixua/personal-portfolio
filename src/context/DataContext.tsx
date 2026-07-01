@@ -40,6 +40,7 @@ function mapApiProject(p: any): Project {
     description: p.description ?? "",
     longDescription: p.longDescription ?? undefined,
     overview: p.overview ?? undefined,
+    detail: p.detail ?? undefined,
     category: p.category ?? undefined,
     role: p.role ?? undefined,
     period: p.period ?? undefined,

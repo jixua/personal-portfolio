@@ -13,6 +13,7 @@ export interface Project {
   description: string;
   longDescription?: string;
   overview?: string;
+  detail?: string;
   category?: "Backend" | "Full Stack";
   role?: string;
   period?: string;

@@ -60,7 +60,8 @@ export default function App() {
           <Route path="/" element={<MainLayout><Home /></MainLayout>} />
           <Route path="/portfolio" element={<MainLayout><Portfolio /></MainLayout>} />
           <Route path="/portfolio/:id" element={<MainLayout><ProjectDetail /></MainLayout>} />
-          <Route path="/blog" element={<MainLayout><BlogPage /></MainLayout>} />
+          <Route path="/blog" element={<MainLayout><BlogPage mode="blog" /></MainLayout>} />
+          <Route path="/interview" element={<MainLayout><BlogPage mode="docs" /></MainLayout>} />
           <Route path="/admin" element={<AdminPage />} />
         </Routes>
       </div>

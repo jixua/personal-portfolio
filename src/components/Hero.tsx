@@ -1,6 +1,5 @@
 import { motion } from "motion/react";
 import { ArrowRight, Activity, Workflow, Layers, Sparkles } from "lucide-react";
-import { useData } from "../context/DataContext";
 
 const BAR_HEIGHTS = [38, 22, 44, 28, 58, 78, 48, 68, 38, 58, 88, 72, 42, 62, 84, 100];
 
@@ -37,14 +36,6 @@ function Seal({ children }: { children: React.ReactNode }) {
 }
 
 export function Hero() {
-  const { projects, experiences } = useData();
-  const skillTags = Array.from(
-    new Set([
-      ...projects.flatMap((project) => project.stack?.length ? project.stack : project.tags),
-      ...experiences.flatMap((experience) => experience.techStack),
-    ])
-  ).slice(0, 4);
-
   return (
     <section
       style={{ background: "linear-gradient(170deg, var(--paper) 0%, #fafafa 55%)" }}
@@ -199,28 +190,6 @@ export function Hero() {
             </a>
           </div>
 
-          {/* Tech tags */}
-          {skillTags.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {skillTags.map((tag, i) => (
-                <span
-                  key={tag}
-                  style={{
-                    display: "inline-flex",
-                    padding: "4px 10px",
-                    borderRadius: 8,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    background: i === 0 ? "#eef2ff" : "#f9fafb",
-                    border: `1px solid ${i === 0 ? "#e0e7ff" : "#f3f4f6"}`,
-                    color: i === 0 ? "#4338ca" : "#4b5563",
-                  }}
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          )}
         </motion.div>
 
         {/* RIGHT — Bento */}

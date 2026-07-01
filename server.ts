@@ -45,6 +45,7 @@ sqlite.exec(`
     title TEXT NOT NULL,
     description TEXT,
     longDescription TEXT,
+    detail TEXT,
     features TEXT,
     tags TEXT,
     imageUrl TEXT,
@@ -91,6 +92,7 @@ const projectMigrations = [
   "ALTER TABLE projects ADD COLUMN role TEXT",
   "ALTER TABLE projects ADD COLUMN period TEXT",
   "ALTER TABLE projects ADD COLUMN overview TEXT",
+  "ALTER TABLE projects ADD COLUMN detail TEXT",
   "ALTER TABLE projects ADD COLUMN stack TEXT",
   "ALTER TABLE projects ADD COLUMN sortOrder INTEGER",
   "ALTER TABLE posts ADD COLUMN sortOrder INTEGER",
@@ -295,18 +297,18 @@ async function startServer() {
   });
 
   app.post("/api/projects", requireAuth, (req, res) => {
-    const { num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github } = req.body;
+    const { num, title, subtitle, description, longDescription, overview, detail, category, role, period, features, tags, stack, imageUrl, link, github } = req.body;
     const info = sqlite.prepare(
-      "INSERT INTO projects (num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github, nextSortOrder("projects"));
+      "INSERT INTO projects (num, title, subtitle, description, longDescription, overview, detail, category, role, period, features, tags, stack, imageUrl, link, github, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(num, title, subtitle, description, longDescription, overview, detail, category, role, period, features, tags, stack, imageUrl, link, github, nextSortOrder("projects"));
     res.json({ id: info.lastInsertRowid });
   });
 
   app.put("/api/projects/:id", requireAuth, (req, res) => {
-    const { num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github } = req.body;
+    const { num, title, subtitle, description, longDescription, overview, detail, category, role, period, features, tags, stack, imageUrl, link, github } = req.body;
     sqlite.prepare(
-      "UPDATE projects SET num=?, title=?, subtitle=?, description=?, longDescription=?, overview=?, category=?, role=?, period=?, features=?, tags=?, stack=?, imageUrl=?, link=?, github=? WHERE id=?"
-    ).run(num, title, subtitle, description, longDescription, overview, category, role, period, features, tags, stack, imageUrl, link, github, req.params.id);
+      "UPDATE projects SET num=?, title=?, subtitle=?, description=?, longDescription=?, overview=?, detail=?, category=?, role=?, period=?, features=?, tags=?, stack=?, imageUrl=?, link=?, github=? WHERE id=?"
+    ).run(num, title, subtitle, description, longDescription, overview, detail, category, role, period, features, tags, stack, imageUrl, link, github, req.params.id);
     res.json({ ok: true });
   });
 

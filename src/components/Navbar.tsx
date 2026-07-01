@@ -19,6 +19,7 @@ export function Navbar() {
           <Link to={isHome ? "#about" : "/#about"} className="hover:text-indigo-600 transition-colors">关于我</Link>
           <Link to="/portfolio" className={`transition-colors ${location.pathname === "/portfolio" ? "text-indigo-600 font-bold" : "hover:text-indigo-600"}`}>作品集</Link>
           <Link to="/blog" className={`transition-colors ${location.pathname === "/blog" ? "text-indigo-600 font-bold" : "hover:text-indigo-600"}`}>博客</Link>
+          <Link to="/interview" className={`transition-colors ${location.pathname === "/interview" ? "text-teal-600 font-bold" : "hover:text-teal-600"}`}>面经</Link>
         </div>
 
         <div className="flex items-center gap-3">

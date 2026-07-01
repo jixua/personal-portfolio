@@ -200,7 +200,7 @@ export function Portfolio() {
   const filters: Category[] = ["All", "Backend", "Full Stack"];
 
   return (
-    <div className="min-h-screen bg-[#fafafa]">
+    <div className="min-h-screen bg-[#fafafa] pt-20">
       {/* Header */}
       <div
         style={{
@@ -208,7 +208,7 @@ export function Portfolio() {
           borderBottom: "1px solid #f3f4f6",
         }}
       >
-        <div className="max-w-6xl mx-auto px-7" style={{ paddingTop: 72, paddingBottom: 60 }}>
+        <div className="max-w-6xl mx-auto px-7" style={{ paddingTop: 48, paddingBottom: 60 }}>
           <motion.div
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}

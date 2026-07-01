@@ -4,12 +4,13 @@ import { motion } from "motion/react";
 import { ArrowLeft, ArrowRight, Zap, FileText, CheckCircle2 } from "lucide-react";
 import { useData } from "../context/DataContext";
 import type { Project, ProjectFeature } from "../data";
+import { MarkdownRenderer } from "../components/MarkdownRenderer";
 
 function isFeatureObject(f: unknown): f is ProjectFeature {
   return typeof f === "object" && f !== null && "title" in f;
 }
 
-function FeatureCard({ feature, index }: { feature: ProjectFeature; index: number; isLast: boolean }) {
+function FeatureCard({ feature, index, isLast }: { feature: ProjectFeature; index: number; isLast: boolean }) {
   const [hovered, setHovered] = useState(false);
   return (
     <div
@@ -20,8 +21,8 @@ function FeatureCard({ feature, index }: { feature: ProjectFeature; index: numbe
         display: "flex",
         alignItems: "flex-start",
         gap: 16,
-        padding: "17px 0",
-        borderBottom: "1px solid #f3f4f6",
+        padding: "20px 0",
+        borderBottom: isLast ? "none" : "1px solid #f3f4f6",
         transition: "all 0.2s",
       }}
     >
@@ -45,8 +46,8 @@ function FeatureCard({ feature, index }: { feature: ProjectFeature; index: numbe
         style={{
           fontFamily: "var(--font-mono)",
           fontWeight: 700,
-          fontSize: 11,
-          color: hovered ? "#4f46e5" : "#d1d5db",
+          fontSize: 12,
+          color: hovered ? "#4f46e5" : "#94a3b8",
           width: 22,
           flexShrink: 0,
           transition: "color 0.2s",
@@ -61,10 +62,10 @@ function FeatureCard({ feature, index }: { feature: ProjectFeature; index: numbe
         <div
           style={{
             fontFamily: "var(--font-sans)",
-            fontWeight: 500,
-            fontSize: 14,
-            lineHeight: 1.65,
-            color: hovered ? "#111827" : "#374151",
+            fontWeight: 700,
+            fontSize: 17,
+            lineHeight: 1.55,
+            color: "#111827",
             transition: "color 0.2s",
           }}
         >
@@ -74,10 +75,11 @@ function FeatureCard({ feature, index }: { feature: ProjectFeature; index: numbe
           <div
             style={{
               fontFamily: "var(--font-sans)",
-              fontWeight: 400,
-              fontSize: 12,
-              color: "#9ca3af",
-              marginTop: 2,
+              fontWeight: 500,
+              fontSize: 16,
+              lineHeight: 1.55,
+              color: "#24315f",
+              marginTop: 8,
               transition: "color 0.2s",
             }}
           >
@@ -96,8 +98,8 @@ function FeatureCard({ feature, index }: { feature: ProjectFeature; index: numbe
           style={{
             fontFamily: "var(--font-mono)",
             fontWeight: 600,
-            fontSize: 11,
-            color: hovered ? "#4f46e5" : "#9ca3af",
+            fontSize: 12,
+            color: hovered ? "#4f46e5" : "#64748b",
             transition: "color 0.2s",
             whiteSpace: "nowrap",
             paddingTop: 2,
@@ -438,6 +440,39 @@ export function ProjectDetail() {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Detail introduction */}
+        {project.detail?.trim() && (
+          <div>
+            <div className="flex items-center gap-3 mb-5">
+              <div
+                style={{
+                  width: 34, height: 34,
+                  background: "#eef2ff",
+                  borderRadius: 10,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <FileText className="w-4 h-4 text-indigo-600" />
+              </div>
+              <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20, color: "#111827" }}>
+                详情介绍
+              </h2>
+            </div>
+            <div
+              style={{
+                background: "#fff",
+                borderRadius: 24,
+                border: "1px solid #f3f4f6",
+                boxShadow: "0 8px 30px rgba(0,0,0,0.04)",
+                padding: "32px 36px",
+              }}
+            >
+              <MarkdownRenderer content={project.detail} className="prose-headings:scroll-mt-28" />
             </div>
           </div>
         )}

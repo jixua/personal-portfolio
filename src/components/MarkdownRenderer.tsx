@@ -1,4 +1,4 @@
-import React, { useMemo, useState, type ComponentPropsWithoutRef } from "react";
+import React, { useEffect, useId, useMemo, useState, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -15,6 +15,10 @@ interface MarkdownRendererProps {
   content: string;
   className?: string;
   showFrontmatter?: boolean;
+  editableTables?: {
+    onAddColumn: (tableIndex: number) => void;
+    onAddRow: (tableIndex: number) => void;
+  };
 }
 
 type MarkdownNodeWithPosition = {
@@ -36,6 +40,23 @@ const sanitizeSchema = {
     span: [...(defaultSchema.attributes?.span ?? []), ["className"], ["aria-hidden"]],
   },
 };
+
+let mermaidInstance: Awaited<typeof import("mermaid")>["default"] | null = null;
+let mermaidRenderCounter = 0;
+
+async function getMermaidInstance() {
+  if (mermaidInstance) return mermaidInstance;
+
+  const mermaid = (await import("mermaid")).default;
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: "default",
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+  });
+  mermaidInstance = mermaid;
+  return mermaid;
+}
 
 const headingSizeClasses: Record<1 | 2 | 3 | 4 | 5 | 6, string> = {
   1: "text-3xl md:text-4xl mt-0 mb-8",
@@ -83,30 +104,36 @@ function formatCodeLanguage(language: string) {
   return language === "text" ? "TEXT" : language.toUpperCase();
 }
 
-function CodeBlock({ code, language }: { code: string; language: string }) {
+function CopyButton({ text, title = "复制代码" }: { text: string; title?: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(code);
+    await navigator.clipboard.writeText(text);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   };
 
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-semibold text-slate-500 transition-colors hover:bg-white hover:text-slate-900"
+      title={title}
+    >
+      {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+      {copied ? "已复制" : "复制"}
+    </button>
+  );
+}
+
+function CodeBlock({ code, language }: { code: string; language: string }) {
   return (
     <div className="not-prose group my-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_8px_18px_rgba(15,23,42,0.08)]">
       <div className="flex h-[50px] items-center justify-between border-b border-slate-200 bg-[#f8fafc] px-[18px]">
         <span className="font-mono text-[12px] font-bold uppercase tracking-[0.08em] text-slate-500">
           {formatCodeLanguage(language)}
         </span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-semibold text-slate-500 transition-colors hover:bg-white hover:text-slate-900"
-          title="复制代码"
-        >
-          {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-          {copied ? "已复制" : "复制"}
-        </button>
+        <CopyButton text={code} />
       </div>
       <SyntaxHighlighter
         style={oneLight as Record<string, React.CSSProperties>}
@@ -135,12 +162,68 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
   );
 }
 
+function MermaidBlock({ code }: { code: string }) {
+  const reactId = useId();
+  const [svg, setSvg] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function renderMermaid() {
+      try {
+        const mermaid = await getMermaidInstance();
+        setError(null);
+        setSvg("");
+
+        const safeId = reactId.replace(/[^a-zA-Z0-9_-]/g, "");
+        mermaidRenderCounter += 1;
+        const { svg: renderedSvg } = await mermaid.render(`markdown-mermaid-${safeId}-${mermaidRenderCounter}`, code);
+        if (!cancelled) setSvg(renderedSvg);
+      } catch (renderError) {
+        if (!cancelled) {
+          setError(renderError instanceof Error ? renderError.message : "Mermaid 图表渲染失败");
+        }
+      }
+    }
+
+    renderMermaid();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [code, reactId]);
+
+  return (
+    <div className="not-prose group my-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_8px_18px_rgba(15,23,42,0.08)]">
+      <div className="flex h-[50px] items-center justify-between border-b border-slate-200 bg-[#f8fafc] px-[18px]">
+        <span className="font-mono text-[12px] font-bold uppercase tracking-[0.08em] text-slate-500">MERMAID</span>
+        <CopyButton text={code} />
+      </div>
+      <div className="overflow-x-auto bg-white p-5">
+        {error ? (
+          <div className="rounded-lg border border-red-100 bg-red-50 p-4">
+            <p className="m-0 text-sm font-semibold text-red-700">Mermaid 图表语法无法渲染</p>
+            <p className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-red-600">{error}</p>
+          </div>
+        ) : svg ? (
+          <div className="mermaid-rendered min-w-max" dangerouslySetInnerHTML={{ __html: svg }} />
+        ) : (
+          <div className="text-sm font-medium text-slate-400">正在渲染图表...</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PreRenderer({ children }: ComponentPropsWithoutRef<"pre">) {
   const codeElement = getCodeElement(children);
   if (!codeElement) return <pre>{children}</pre>;
 
   const code = extractText(codeElement.props.children).replace(/\n$/, "");
   const language = getCodeLanguage(codeElement.props.className);
+
+  if (language === "mermaid") return <MermaidBlock code={code} />;
 
   return <CodeBlock code={code} language={language} />;
 }
@@ -224,11 +307,12 @@ function FrontmatterBlock({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-export function MarkdownRenderer({ content, className, showFrontmatter = false }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, className, showFrontmatter = false, editableTables }: MarkdownRendererProps) {
   const parsed = useMemo(() => parseMarkdownContent(content), [content]);
   const headingIdByLine = useMemo(() => {
     return new Map(extractMarkdownHeadings(parsed.content).map((heading) => [heading.line, heading.id]));
   }, [parsed.content]);
+  let tableIndex = 0;
 
   const getHeadingId = (text: string, node?: MarkdownNodeWithPosition) => {
     const line = node?.position?.start?.line;
@@ -269,11 +353,40 @@ export function MarkdownRenderer({ content, className, showFrontmatter = false }
     input: ({ node: _node, className: inputClassName, ...props }) => (
       <input className={cx("mr-2 translate-y-[1px] accent-indigo-600", inputClassName)} readOnly {...props} />
     ),
-    table: ({ node: _node, className: tableClassName, ...props }) => (
-      <div className="not-prose my-8 overflow-x-auto rounded-xl border border-gray-200">
-        <table className={cx("w-full border-collapse text-sm", tableClassName)} {...props} />
-      </div>
-    ),
+    table: ({ node: _node, className: tableClassName, ...props }) => {
+      const currentTableIndex = tableIndex;
+      tableIndex += 1;
+
+      return (
+        <div className={cx("not-prose my-8 rounded-xl border border-gray-200", editableTables ? "admin-preview-table-wrap" : "overflow-x-auto")}>
+          <div className={editableTables ? "overflow-x-auto rounded-xl" : undefined}>
+            <table className={cx("w-full border-collapse text-sm", tableClassName)} {...props} />
+          </div>
+          {editableTables && (
+            <>
+              <button
+                type="button"
+                className="md-table-add md-table-add-col"
+                onClick={() => editableTables.onAddColumn(currentTableIndex)}
+                aria-label="在右方新增列"
+                title="在右方新增列"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="md-table-add md-table-add-row"
+                onClick={() => editableTables.onAddRow(currentTableIndex)}
+                aria-label="在下方新增行"
+                title="在下方新增行"
+              >
+                +
+              </button>
+            </>
+          )}
+        </div>
+      );
+    },
     th: ({ node: _node, className: thClassName, children, ...props }) => (
       <th className={cx("border-b border-gray-200 bg-gray-50 px-4 py-3 text-left font-bold text-gray-900", thClassName)} {...props}>
         <TableCellContent>{children}</TableCellContent>

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="jixu-favicon-gradient" x1="12" y1="56" x2="54" y2="8" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+    <filter id="jixu-favicon-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#6366f1" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="48" height="48" rx="13" fill="url(#jixu-favicon-gradient)" filter="url(#jixu-favicon-shadow)"/>
+  <text
+    x="32"
+    y="39"
+    text-anchor="middle"
+    font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+    font-size="28"
+    font-weight="700"
+    fill="#ffffff"
+  >J</text>
+</svg>
