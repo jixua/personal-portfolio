@@ -263,6 +263,7 @@ export function AdminPage() {
   const [formOverview, setFormOverview] = useState("");
   const [formDetail, setFormDetail] = useState("");
   const formDetailRef = useRef<HTMLTextAreaElement | null>(null);
+  const [projectDetailPasteUploadCount, setProjectDetailPasteUploadCount] = useState(0);
   const [formLongDescription, setFormLongDescription] = useState("");
   const [formFeatureRows, setFormFeatureRows] = useState<FeatureRow[]>([]);
   const dragIndexRef = useRef<number | null>(null);
@@ -614,6 +615,55 @@ export function AdminPage() {
     } catch (error) {
       alert(error instanceof Error ? error.message : "图片上传失败");
     }
+  };
+
+  const replaceProjectDetailMarkdown = (search: string, replacement: string) => {
+    setFormDetail((current) => {
+      const index = current.indexOf(search);
+      if (index === -1) return current;
+      return `${current.slice(0, index)}${replacement}${current.slice(index + search.length)}`;
+    });
+  };
+
+  const handleProjectDetailPasteImages = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const images = getClipboardImageFiles(event.clipboardData);
+    if (images.length === 0) return;
+
+    event.preventDefault();
+    const textarea = event.currentTarget;
+    const pastedAt = Date.now();
+    const placeholders = images.map((_, index) => `![图片上传中 ${index + 1}](uploading://project-detail-image-${pastedAt}-${index})`);
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = formDetail.slice(0, start);
+    const after = formDetail.slice(end);
+    const prefix = before.length === 0 || before.endsWith("\n") ? "" : "\n\n";
+    const markdown = placeholders.join("\n\n");
+    const suffix = after.length === 0 || after.startsWith("\n") ? "" : "\n\n";
+    const next = `${before}${prefix}${markdown}${suffix}${after}`;
+    const cursor = before.length + prefix.length + markdown.length;
+    setFormDetail(next);
+    setProjectDetailPasteUploadCount((count) => count + images.length);
+
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
+    });
+
+    await Promise.all(
+      images.map(async (file, index) => {
+        const placeholder = placeholders[index];
+        try {
+          const url = await uploadMarkdownAsset(file);
+          replaceProjectDetailMarkdown(placeholder, `![${getImageAltText(file, index)}](${url})`);
+        } catch (error) {
+          replaceProjectDetailMarkdown(placeholder, `<!-- 图片上传失败：${file.name || `clipboard-image-${index + 1}`} -->`);
+          alert(error instanceof Error ? error.message : "图片上传失败");
+        } finally {
+          setProjectDetailPasteUploadCount((count) => Math.max(0, count - 1));
+        }
+      }),
+    );
   };
 
   const resolveMarkdownAssets = async (
@@ -1193,7 +1243,11 @@ export function AdminPage() {
                       <div className="flex items-center justify-between gap-3 mb-2">
                         <div>
                           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">详情介绍</label>
-                          <p className="text-xs text-gray-400 mt-0.5">对应详情页「核心功能」下方的 Markdown 内容，支持标题、列表、代码块、表格和图片</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {projectDetailPasteUploadCount > 0
+                              ? `正在上传 ${projectDetailPasteUploadCount} 张图片`
+                              : "对应详情页「核心功能」下方的 Markdown 内容，支持标题、列表、代码块、表格和图片"}
+                          </p>
                         </div>
                         <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors text-xs font-bold cursor-pointer shrink-0">
                           <input
@@ -1214,6 +1268,7 @@ export function AdminPage() {
                         ref={formDetailRef}
                         value={formDetail}
                         onChange={(e) => setFormDetail(e.target.value)}
+                        onPaste={handleProjectDetailPasteImages}
                         rows={10}
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-y text-sm font-mono leading-7"
                         placeholder={"## 技术实现\n\n- 关键设计点\n- 复杂问题与解决方案\n\n```ts\n// code\n```"}

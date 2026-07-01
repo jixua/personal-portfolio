@@ -74,7 +74,7 @@ export function Projects() {
                     <h3 className="font-display font-bold text-xl md:text-2xl text-gray-900 mb-3 mt-1 group-hover:text-indigo-600 transition-colors">
                       {project.title}
                     </h3>
-                    <p className="text-gray-500 text-sm md:text-base leading-relaxed mb-5 flex-1 line-clamp-3">
+                    <p className="mb-5 flex-1 line-clamp-3 font-medium text-[16px] leading-[1.55] text-[#24315f]">
                       {project.description}
                     </p>
 

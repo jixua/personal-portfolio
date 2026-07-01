@@ -127,10 +127,10 @@ function WorkProjectCard({ project, index }: { project: Project; index: number }
             <p
               style={{
                 fontFamily: "var(--font-sans)",
-                fontSize: 14,
+                fontSize: 16,
                 fontWeight: 500,
-                lineHeight: 1.65,
-                color: "#6b7280",
+                lineHeight: 1.55,
+                color: "#24315f",
                 marginBottom: 20,
                 display: "-webkit-box",
                 WebkitLineClamp: 3,

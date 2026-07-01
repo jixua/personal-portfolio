@@ -78,7 +78,7 @@ function FeatureCard({ feature, index, isLast }: { feature: ProjectFeature; inde
               fontWeight: 500,
               fontSize: 16,
               lineHeight: 1.55,
-              color: "#24315f",
+              color: "#111827",
               marginTop: 8,
               transition: "color 0.2s",
             }}
@@ -140,6 +140,8 @@ export function ProjectDetail() {
   const isObjectFeatures = features.length > 0 && isFeatureObject(features[0]);
   const objectFeatures = isObjectFeatures ? (features as ProjectFeature[]) : [];
   const stringFeatures = !isObjectFeatures ? (features as string[]) : [];
+  const techStack = project.stack ?? project.tags;
+  const overviewText = project.overview || project.longDescription || project.description;
 
   return (
     <motion.div
@@ -280,58 +282,28 @@ export function ProjectDetail() {
         </div>
       </div>
 
-      {/* Metadata bar */}
-      <div className="max-w-6xl mx-auto px-7 mt-5">
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 24,
-            border: "1px solid #f3f4f6",
-            boxShadow: "0 8px 30px rgba(0,0,0,0.04)",
-            padding: "22px 32px",
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: 24,
-          }}
-        >
-          {project.role && (
+      {project.role && (
+        <div className="max-w-6xl mx-auto px-7 mt-5">
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 24,
+              border: "1px solid #f3f4f6",
+              boxShadow: "0 8px 30px rgba(0,0,0,0.04)",
+              padding: "22px 32px",
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 24,
+            }}
+          >
             <div style={{ paddingRight: 32, borderRight: "1px solid #f3f4f6" }}>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "#9ca3af", marginBottom: 4 }}>角色</div>
               <div style={{ fontFamily: "var(--font-sans)", fontWeight: 600, fontSize: 14, color: "#111827" }}>{project.role}</div>
             </div>
-          )}
-          {project.period && (
-            <div style={{ paddingRight: 32, borderRight: "1px solid #f3f4f6" }}>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "#9ca3af", marginBottom: 4 }}>项目周期</div>
-              <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 13, color: "#111827" }}>{project.period}</div>
-            </div>
-          )}
-          {(project.stack ?? project.tags).length > 0 && (
-            <div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "#9ca3af", marginBottom: 8 }}>技术栈</div>
-              <div className="flex flex-wrap gap-1.5">
-                {(project.stack ?? project.tags).map((tech) => (
-                  <span
-                    key={tech}
-                    style={{
-                      padding: "2px 10px",
-                      borderRadius: 9999,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      background: "#eef2ff",
-                      color: "#4338ca",
-                      border: "1px solid #e0e7ff",
-                    }}
-                  >
-                    {tech}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Content area */}
       <div
@@ -339,7 +311,7 @@ export function ProjectDetail() {
         style={{ marginTop: 44, paddingBottom: 100, gap: 48 }}
       >
         {/* Overview */}
-        {(project.overview || project.longDescription || project.description) && (
+        {(overviewText || project.period || techStack.length > 0) && (
           <div>
             <div className="flex items-center gap-3 mb-5">
               <div
@@ -366,19 +338,54 @@ export function ProjectDetail() {
                 padding: "32px 36px",
               }}
             >
-              <p
-                style={{
-                  fontFamily: "var(--font-sans)",
-                  fontWeight: 500,
-                  fontSize: 15,
-                  lineHeight: 1.88,
-                  color: "#4b5563",
-                  whiteSpace: "pre-line",
-                  margin: 0,
-                }}
-              >
-                {project.overview || project.longDescription || project.description}
-              </p>
+              {(project.period || techStack.length > 0) && (
+                <div className="mb-7 grid gap-5 md:grid-cols-[180px_minmax(0,1fr)]">
+                  {project.period && (
+                    <div>
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "#9ca3af", marginBottom: 8 }}>项目周期</div>
+                      <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 13, color: "#111827" }}>{project.period}</div>
+                    </div>
+                  )}
+                  {techStack.length > 0 && (
+                    <div>
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "#9ca3af", marginBottom: 8 }}>技术栈</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {techStack.map((tech) => (
+                          <span
+                            key={tech}
+                            style={{
+                              padding: "2px 10px",
+                              borderRadius: 9999,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              background: "#eef2ff",
+                              color: "#4338ca",
+                              border: "1px solid #e0e7ff",
+                            }}
+                          >
+                            {tech}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {overviewText && (
+                <p
+                  style={{
+                    fontFamily: "var(--font-sans)",
+                    fontWeight: 500,
+                    fontSize: 16,
+                    lineHeight: 1.88,
+                    color: "#111827",
+                    whiteSpace: "pre-line",
+                    margin: 0,
+                  }}
+                >
+                  {overviewText}
+                </p>
+              )}
             </div>
           </div>
         )}
