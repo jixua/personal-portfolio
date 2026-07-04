@@ -64,7 +64,7 @@ export function Blog() {
                     <Sparkles className="inline-block w-5 h-5 ml-2 text-yellow-400 opacity-0 -translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300" />
                   </h3>
 
-                  <p className="text-gray-500 text-base md:text-lg leading-relaxed max-w-2xl">
+                  <p className="text-gray-500 text-base md:text-lg leading-relaxed max-w-2xl line-clamp-2">
                     {post.snippet}
                   </p>
                 </Link>
