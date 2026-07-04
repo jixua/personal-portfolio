@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { motion } from "motion/react";
-import { ArrowLeft, ArrowRight, Zap, FileText, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Github, Zap, FileText, CheckCircle2 } from "lucide-react";
 import { useData } from "../context/DataContext";
 import type { Project, ProjectFeature } from "../data";
 import { MarkdownRenderer } from "../components/MarkdownRenderer";
 
 function isFeatureObject(f: unknown): f is ProjectFeature {
   return typeof f === "object" && f !== null && "title" in f;
+}
+
+function isUsableProjectUrl(value?: string) {
+  return Boolean(value && value.trim() && value.trim() !== "#");
 }
 
 function FeatureCard({ feature, index, isLast }: { feature: ProjectFeature; index: number; isLast: boolean }) {
@@ -142,6 +146,10 @@ export function ProjectDetail() {
   const stringFeatures = !isObjectFeatures ? (features as string[]) : [];
   const techStack = project.stack ?? project.tags;
   const overviewText = project.overview || project.longDescription || project.description;
+  const projectLinks = [
+    isUsableProjectUrl(project.link) ? { label: "在线访问", href: project.link as string, icon: ExternalLink } : null,
+    isUsableProjectUrl(project.github) ? { label: "源码仓库", href: project.github as string, icon: Github } : null,
+  ].filter((item): item is { label: string; href: string; icon: typeof ExternalLink } => Boolean(item));
 
   return (
     <motion.div
@@ -275,6 +283,22 @@ export function ProjectDetail() {
                   >
                     {tag}
                   </span>
+                ))}
+              </div>
+            )}
+            {projectLinks.length > 0 && (
+              <div className="mt-5 flex flex-wrap gap-2.5">
+                {projectLinks.map(({ label, href, icon: Icon }) => (
+                  <a
+                    key={label}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-10 items-center gap-2 rounded-full border border-white/25 bg-white/14 px-4 text-sm font-bold text-white no-underline backdrop-blur-md transition-colors hover:bg-white hover:text-slate-900"
+                  >
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </a>
                 ))}
               </div>
             )}
