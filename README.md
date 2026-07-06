@@ -13,6 +13,26 @@
 - 图片上传：支持本地上传目录，也支持阿里云 OSS；当前线上配置已接入 OSS。
 - 持久化：使用 SQLite 单文件数据库，适合个人站点和低资源服务器。
 
+## 项目截图
+
+以下截图来自 SQLite 中「个人作品集网站与内容管理系统」项目详情记录，图片已迁移到阿里云 OSS。
+
+![首页](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783168562239-689232357.png)
+
+![作品集列表](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783173143337-947659170.png)
+
+![项目详情](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783173163550-140082579.png)
+
+![博客文章](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783168615143-331778274.png)
+
+![面经知识库](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783168621283-586531558.png)
+
+![后台总览](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783168634807-442742551.png)
+
+![作品管理](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783173207482-234656683.png)
+
+![项目编辑表单](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783173239369-232783931.png)
+
 ## 技术栈
 
 - 前端：React 19、TypeScript、React Router、Tailwind CSS、motion、lucide-react
