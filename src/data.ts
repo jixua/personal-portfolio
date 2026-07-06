@@ -20,6 +20,7 @@ export interface Project {
   features?: ProjectFeature[] | string[];
   tags: string[];
   stack?: string[];
+  thumbnailUrl?: string;
   imageUrl: string;
   link?: string;
   github?: string;
@@ -33,6 +34,9 @@ export interface BlogPost {
   content?: string;
   date: string;
   readTime: string;
+  category?: string;
+  tag?: string;
+  tagColor?: "indigo" | "teal" | "purple";
 }
 
 export interface DocNode {

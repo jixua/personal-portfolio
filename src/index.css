@@ -23,6 +23,10 @@
 @keyframes jx-fade   { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes jx-ping   { 75%, 100% { transform: scale(2.2); opacity: 0; } }
 
+.jx-screen {
+  animation: jx-fade 0.5s var(--ease-signature);
+}
+
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 80px;

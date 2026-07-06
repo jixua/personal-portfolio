@@ -50,9 +50,11 @@ export function Projects() {
                   <div className="overflow-hidden relative rounded-[1.5rem] bg-gray-100 h-[220px] md:h-full md:w-[45%] shrink-0">
                     <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent z-10 transition-opacity duration-300 group-hover:opacity-0" />
                     <img
-                      src={project.imageUrl}
+                      src={project.thumbnailUrl || project.imageUrl}
                       alt={project.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+                      loading={idx === 0 ? "eager" : "lazy"}
+                      decoding="async"
                     />
                     <div className="absolute top-4 left-4 z-20 flex flex-wrap gap-2">
                       {project.tags.slice(0, 2).map((tag, tIdx) => (

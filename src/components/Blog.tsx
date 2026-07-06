@@ -49,7 +49,7 @@ export function Blog() {
 
                 <div className="absolute left-[-6px] top-1/2 -translate-y-1/2 w-3 h-3 bg-white border-2 border-gray-200 rounded-full group-hover:border-indigo-500 group-hover:shadow-[0_0_12px_rgba(99,102,241,0.6)] transition-all duration-300" />
 
-                <Link to={`/blog?id=${post.id}`} className="block">
+                <Link to={`/blog/read?id=${post.id}`} className="block">
                   <div className="flex flex-wrap items-center gap-4 text-xs font-bold font-mono text-gray-400 uppercase tracking-widest mb-4">
                     <span className="flex items-center gap-1.5 text-indigo-500 bg-indigo-50 px-3 py-1 rounded-full">
                       <Calendar className="w-3.5 h-3.5" /> {post.date}

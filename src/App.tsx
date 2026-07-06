@@ -15,6 +15,8 @@ import { SectionDivider } from "./components/SectionDivider";
 import { Portfolio } from "./pages/Portfolio";
 import { ProjectDetail } from "./pages/ProjectDetail";
 import { BlogPage } from "./pages/BlogPage";
+import { BlogLanding } from "./pages/BlogLanding";
+import { InterviewLanding } from "./pages/InterviewLanding";
 import { AdminPage } from "./pages/AdminPage";
 import { DataProvider } from "./context/DataContext";
 
@@ -60,8 +62,10 @@ export default function App() {
           <Route path="/" element={<MainLayout><Home /></MainLayout>} />
           <Route path="/portfolio" element={<MainLayout><Portfolio /></MainLayout>} />
           <Route path="/portfolio/:id" element={<MainLayout><ProjectDetail /></MainLayout>} />
-          <Route path="/blog" element={<MainLayout><BlogPage mode="blog" /></MainLayout>} />
-          <Route path="/interview" element={<MainLayout><BlogPage mode="docs" /></MainLayout>} />
+          <Route path="/blog" element={<MainLayout><BlogLanding /></MainLayout>} />
+          <Route path="/blog/read" element={<MainLayout><BlogPage mode="blog" backPath="/blog" backLabel="返回博客导航" /></MainLayout>} />
+          <Route path="/interview" element={<MainLayout><InterviewLanding /></MainLayout>} />
+          <Route path="/interview/read" element={<MainLayout><BlogPage mode="docs" backPath="/interview" backLabel="返回面经导航" /></MainLayout>} />
           <Route path="/admin" element={<AdminPage />} />
         </Routes>
       </div>

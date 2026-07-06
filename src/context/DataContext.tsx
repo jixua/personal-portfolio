@@ -47,6 +47,7 @@ function mapApiProject(p: any): Project {
     features: parseArray(p.features),
     tags: parseArray(p.tags),
     stack: parseArray(p.stack),
+    thumbnailUrl: p.thumbnailUrl || undefined,
     imageUrl: p.imageUrl ?? "",
     link: p.link || undefined,
     github: p.github || undefined,
@@ -54,6 +55,7 @@ function mapApiProject(p: any): Project {
 }
 
 function mapApiPost(p: any): BlogPost {
+  const category = p.category ?? p.tag ?? "";
   return {
     id: String(p.id),
     sortOrder: p.sortOrder ?? undefined,
@@ -62,6 +64,8 @@ function mapApiPost(p: any): BlogPost {
     content: p.content ?? undefined,
     date: p.date ?? "",
     readTime: p.readTime ?? "",
+    category: category || undefined,
+    tag: category || undefined,
   };
 }
 

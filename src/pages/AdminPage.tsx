@@ -46,6 +46,7 @@ interface ApiPost {
   id: number;
   sortOrder: number | null;
   title: string;
+  category: string | null;
   snippet: string | null;
   date: string | null;
   readTime: string | null;
@@ -251,6 +252,7 @@ export function AdminPage() {
   const [formTitle, setFormTitle] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [formSnippet, setFormSnippet] = useState("");
+  const [formPostCategory, setFormPostCategory] = useState("");
   const [formContent, setFormContent] = useState("");
   const [formImageUrl, setFormImageUrl] = useState("");
   const [formDate, setFormDate] = useState("");
@@ -338,6 +340,7 @@ export function AdminPage() {
     setFormTitle("");
     setFormDescription("");
     setFormSnippet("");
+    setFormPostCategory("");
     setFormContent("");
     setFormImageUrl("");
     setFormDate("");
@@ -411,6 +414,7 @@ export function AdminPage() {
     } else {
       const p = item as ApiPost;
       setFormTitle(p.title ?? "");
+      setFormPostCategory(p.category ?? "");
       setFormSnippet(p.snippet ?? "");
       setFormContent(p.content ?? "");
       setFormDate(p.date ?? "");
@@ -495,7 +499,7 @@ export function AdminPage() {
           await saveJson("/api/experiences", { method: "POST", headers, body: JSON.stringify(body) });
         }
       } else {
-        const body = { title: formTitle, snippet: formSnippet, date: formDate, readTime: formReadTime, content: formContent };
+        const body = { title: formTitle, category: formPostCategory.trim(), snippet: formSnippet, date: formDate, readTime: formReadTime, content: formContent };
         if (editingContext.item) {
           await saveJson(`/api/posts/${(editingContext.item as ApiPost).id}`, { method: "PUT", headers, body: JSON.stringify(body) });
         } else {
@@ -885,6 +889,8 @@ export function AdminPage() {
               setFormTitle={setFormTitle}
               formSnippet={formSnippet}
               setFormSnippet={setFormSnippet}
+              formPostCategory={formPostCategory}
+              setFormPostCategory={setFormPostCategory}
               formDate={formDate}
               setFormDate={setFormDate}
               formReadTime={formReadTime}
@@ -1331,41 +1337,6 @@ export function AdminPage() {
                       </div>
                     </div>
                   </>
-                ) : editingContext.type === "blog" ? (
-                  <>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">日期</label>
-                        <input
-                          type="text"
-                          value={formDate}
-                          onChange={(e) => setFormDate(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                          placeholder="2026年6月24日"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">阅读时间</label>
-                        <input
-                          type="text"
-                          value={formReadTime}
-                          onChange={(e) => setFormReadTime(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                          placeholder="5 分钟阅读"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">摘要</label>
-                      <textarea
-                        value={formSnippet}
-                        onChange={(e) => setFormSnippet(e.target.value)}
-                        rows={3}
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
-                        placeholder="文章摘要，显示在列表页..."
-                      />
-                    </div>
-                  </>
                 ) : editingContext.type === "experience" ? (
                   <>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1423,7 +1394,7 @@ export function AdminPage() {
                   </>
                 ) : null}
 
-                {(editingContext.type === "blog" || (editingContext.type === "doc" && !editingDocIsFolder)) && (
+                {editingContext.type === "doc" && !editingDocIsFolder && (
                   <div className="flex-1 flex flex-col">
                     <div className="flex items-center justify-between gap-3 mb-2">
                       <label className="block text-sm font-medium text-gray-700">Markdown 正文内容</label>
@@ -1671,6 +1642,8 @@ function BlogManager({
   setFormTitle,
   formSnippet,
   setFormSnippet,
+  formPostCategory,
+  setFormPostCategory,
   formDate,
   setFormDate,
   formReadTime,
@@ -1697,6 +1670,8 @@ function BlogManager({
   setFormTitle: (value: string) => void;
   formSnippet: string;
   setFormSnippet: (value: string) => void;
+  formPostCategory: string;
+  setFormPostCategory: (value: string) => void;
   formDate: string;
   setFormDate: (value: string) => void;
   formReadTime: string;
@@ -1715,9 +1690,13 @@ function BlogManager({
   const dragIdRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
   const filteredPosts = posts.filter((post) => {
-    const text = `${post.title} ${post.snippet ?? ""} ${post.date ?? ""}`.toLowerCase();
+    const text = `${post.title} ${post.category ?? ""} ${post.snippet ?? ""} ${post.date ?? ""}`.toLowerCase();
     return text.includes(query.trim().toLowerCase());
   });
+  const blogCategories = useMemo(
+    () => Array.from(new Set(posts.map((post) => post.category?.trim()).filter((value): value is string => Boolean(value)))).sort((a, b) => a.localeCompare(b, "zh-CN")),
+    [posts],
+  );
 
   const handleDrop = (targetId: number) => {
     const draggedId = dragIdRef.current;
@@ -1775,7 +1754,7 @@ function BlogManager({
                           <span className="block truncate text-sm font-semibold">{p.title}</span>
                         </div>
                         <div className="mt-1 truncate pl-6 text-xs text-slate-400">
-                          {[p.date, p.readTime].filter(Boolean).join(" / ") || "未设置元信息"}
+                          {[p.category, p.date, p.readTime].filter(Boolean).join(" / ") || "未设置元信息"}
                         </div>
                       </button>
                       <button onClick={() => onDelete(p.id)} title="删除" className="rounded-md p-1.5 text-slate-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
@@ -1797,6 +1776,9 @@ function BlogManager({
             setContent={setFormContent}
             snippet={formSnippet}
             setSnippet={setFormSnippet}
+            category={formPostCategory}
+            setCategory={setFormPostCategory}
+            categoryOptions={blogCategories}
             date={formDate}
             setDate={setFormDate}
             readTime={formReadTime}
@@ -1825,6 +1807,9 @@ function MarkdownWorkspaceEditor({
   setContent,
   snippet,
   setSnippet,
+  category,
+  setCategory,
+  categoryOptions = [],
   date,
   setDate,
   readTime,
@@ -1847,6 +1832,9 @@ function MarkdownWorkspaceEditor({
   setContent: (value: string) => void;
   snippet?: string;
   setSnippet?: (value: string) => void;
+  category?: string;
+  setCategory?: (value: string) => void;
+  categoryOptions?: string[];
   date?: string;
   setDate?: (value: string) => void;
   readTime?: string;
@@ -1861,6 +1849,13 @@ function MarkdownWorkspaceEditor({
   assetImportInputRef: React.MutableRefObject<HTMLInputElement | null>;
   pendingMarkdownImport: { markdown: string; markdownFile: File; imagePaths: string[] } | null;
 }) {
+  const [creatingCategory, setCreatingCategory] = useState(false);
+
+  useEffect(() => {
+    if (kind !== "blog") return;
+    if (category && !categoryOptions.includes(category)) setCreatingCategory(true);
+  }, [category, categoryOptions, kind]);
+
   if (!active) {
     return (
       <section className="flex h-full items-center justify-center bg-[#f4fbfb] p-8">
@@ -1909,7 +1904,46 @@ function MarkdownWorkspaceEditor({
         </div>
 
         {kind === "blog" && (
-          <div className="grid grid-cols-[150px_150px_minmax(0,1fr)] gap-3">
+          <div className="grid grid-cols-[170px_150px_150px_minmax(0,1fr)] gap-3">
+            {creatingCategory ? (
+              <div className="flex min-w-0 overflow-hidden rounded-xl border border-teal-200 bg-white focus-within:ring-2 focus-within:ring-teal-100">
+                <input
+                  value={category ?? ""}
+                  onChange={(e) => setCategory?.(e.target.value)}
+                  className="min-w-0 flex-1 px-3 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                  placeholder="新建分类"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreatingCategory(false);
+                    setCategory?.("");
+                  }}
+                  className="border-l border-slate-100 px-2.5 text-xs font-semibold text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600"
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <select
+                value={category ?? ""}
+                onChange={(e) => {
+                  if (e.target.value === "__new__") {
+                    setCreatingCategory(true);
+                    setCategory?.("");
+                    return;
+                  }
+                  setCategory?.(e.target.value);
+                }}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 outline-none transition-colors focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+              >
+                <option value="">未分类</option>
+                {categoryOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+                <option value="__new__">+ 新建分类</option>
+              </select>
+            )}
             <input
               value={date ?? ""}
               onChange={(e) => setDate?.(e.target.value)}

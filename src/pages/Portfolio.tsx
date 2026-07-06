@@ -45,9 +45,11 @@ function WorkProjectCard({ project, index }: { project: Project; index: number }
           {/* Image area */}
           <div className="relative overflow-hidden" style={{ height: 220 }}>
             <img
-              src={project.imageUrl}
+              src={project.thumbnailUrl || project.imageUrl}
               alt={project.title}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+              loading={index < 2 ? "eager" : "lazy"}
+              decoding="async"
             />
             {/* gradient overlay */}
             <div

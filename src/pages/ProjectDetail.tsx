@@ -564,9 +564,11 @@ export function ProjectDetail() {
                   }}
                 >
                   <img
-                    src={nextProject.imageUrl}
+                    src={nextProject.thumbnailUrl || nextProject.imageUrl}
                     alt={nextProject.title}
                     className="w-full h-full object-cover"
+                    loading="lazy"
+                    decoding="async"
                   />
                 </div>
 

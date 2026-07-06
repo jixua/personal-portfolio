@@ -32,7 +32,15 @@ function findDocPath(nodes: DocNode[], id: string, path: string[] = []): string[
   return null;
 }
 
-export function BlogPage({ mode }: { mode: ContentTab }) {
+export function BlogPage({
+  mode,
+  backPath = "/",
+  backLabel = "返回主页",
+}: {
+  mode: ContentTab;
+  backPath?: string;
+  backLabel?: string;
+}) {
   const { posts: blogPosts, docs: knowledgeDocs } = useData();
   const [searchParams, setSearchParams] = useSearchParams();
   const idFromUrl = searchParams.get("id");
@@ -54,9 +62,9 @@ export function BlogPage({ mode }: { mode: ContentTab }) {
 
   useEffect(() => {
     setActiveTab(mode);
-    setActiveId(null);
+    setActiveId(idFromUrl || null);
     activeContentKeyRef.current = null;
-  }, [mode]);
+  }, [mode, idFromUrl]);
 
   const findDoc = (nodes: DocNode[], id: string): DocNode | undefined => {
     for (const node of nodes) {
@@ -195,8 +203,8 @@ export function BlogPage({ mode }: { mode: ContentTab }) {
       {/* Sidebar - fixed on desktop */}
       <div className="w-full md:fixed md:left-0 md:top-20 md:h-[calc(100vh-80px)] md:w-72 bg-white/80 backdrop-blur-md border-r border-gray-100 flex flex-col shrink-0 z-20">
         <div className="p-4 border-b border-gray-100">
-          <Link to="/" className="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-indigo-600 transition-colors mb-4">
-            <ArrowLeft className="w-4 h-4" /> 返回主页
+          <Link to={backPath} className="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-indigo-600 transition-colors mb-4">
+            <ArrowLeft className="w-4 h-4" /> {backLabel}
           </Link>
 
         </div>

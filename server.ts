@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import multer from "multer";
+import OSS from "ali-oss";
 import { knowledgeDocs } from "./src/data";
 
 // Create /data dir if it doesn't exist
@@ -31,6 +32,41 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
+const OSS_PREFIX = (process.env.ALI_OSS_PREFIX || "jixu/portfolio/uploads").replace(/^\/+|\/+$/g, "");
+const OSS_PUBLIC_BASE_URL = (process.env.ALI_OSS_PUBLIC_BASE_URL || "").replace(/\/+$/g, "");
+let ossClient: OSS | null = null;
+
+function getOssClient() {
+  if (ossClient) return ossClient;
+  const accessKeyId = process.env.ALI_OSS_ACCESS_KEY_ID;
+  const accessKeySecret = process.env.ALI_OSS_ACCESS_KEY_SECRET;
+  const bucket = process.env.ALI_OSS_BUCKET;
+  const region = process.env.ALI_OSS_REGION;
+  if (!accessKeyId || !accessKeySecret || !bucket || !region) return null;
+  ossClient = new OSS({
+    accessKeyId,
+    accessKeySecret,
+    bucket,
+    region,
+    endpoint: process.env.ALI_OSS_ENDPOINT || undefined,
+  });
+  return ossClient;
+}
+
+function getOssPublicUrl(objectKey: string) {
+  if (OSS_PUBLIC_BASE_URL) return `${OSS_PUBLIC_BASE_URL}/${objectKey}`;
+  const bucket = process.env.ALI_OSS_BUCKET;
+  const region = process.env.ALI_OSS_REGION;
+  return `https://${bucket}.${region}.aliyuncs.com/${objectKey}`;
+}
+
+function getUploadObjectKey(filename: string) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${OSS_PREFIX}/${year}/${month}/${filename}`;
+}
+
 // Database Setup
 const sqlite = new Database(path.join(dataDir, "database.sqlite"));
 
@@ -48,6 +84,7 @@ sqlite.exec(`
     detail TEXT,
     features TEXT,
     tags TEXT,
+    thumbnailUrl TEXT,
     imageUrl TEXT,
     link TEXT,
     github TEXT
@@ -55,6 +92,7 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
+    category TEXT,
     snippet TEXT,
     date TEXT,
     readTime TEXT,
@@ -86,6 +124,7 @@ const projectMigrations = [
   "ALTER TABLE projects ADD COLUMN link TEXT",
   "ALTER TABLE projects ADD COLUMN github TEXT",
   "ALTER TABLE posts ADD COLUMN snippet TEXT",
+  "ALTER TABLE posts ADD COLUMN category TEXT",
   "ALTER TABLE projects ADD COLUMN num TEXT",
   "ALTER TABLE projects ADD COLUMN subtitle TEXT",
   "ALTER TABLE projects ADD COLUMN category TEXT",
@@ -95,6 +134,7 @@ const projectMigrations = [
   "ALTER TABLE projects ADD COLUMN detail TEXT",
   "ALTER TABLE projects ADD COLUMN stack TEXT",
   "ALTER TABLE projects ADD COLUMN sortOrder INTEGER",
+  "ALTER TABLE projects ADD COLUMN thumbnailUrl TEXT",
   "ALTER TABLE posts ADD COLUMN sortOrder INTEGER",
   "ALTER TABLE docs ADD COLUMN sortOrder INTEGER",
 ];
@@ -234,7 +274,24 @@ async function startServer() {
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
     }
-    res.json({ url: `/uploads/${req.file.filename}` });
+    const client = getOssClient();
+    if (!client) {
+      return res.json({ url: `/uploads/${req.file.filename}` });
+    }
+
+    const objectKey = getUploadObjectKey(req.file.filename);
+    client.put(objectKey, req.file.path, {
+      headers: {
+        "Content-Type": req.file.mimetype,
+        ...(process.env.ALI_OSS_OBJECT_ACL ? { "x-oss-object-acl": process.env.ALI_OSS_OBJECT_ACL } : {}),
+      },
+    }).then(() => {
+      fs.rm(req.file!.path, { force: true }, () => {});
+      res.json({ url: getOssPublicUrl(objectKey), objectKey });
+    }).catch((error) => {
+      console.error("OSS upload failed", error);
+      res.status(500).json({ error: "OSS upload failed" });
+    });
   });
 
   // Auth: Register —— 已关闭，仅允许预置管理员登录
@@ -331,14 +388,14 @@ async function startServer() {
   });
 
   app.post("/api/posts", requireAuth, (req, res) => {
-    const { title, snippet, date, readTime, content } = req.body;
-    const info = sqlite.prepare("INSERT INTO posts (title, snippet, date, readTime, content, sortOrder) VALUES (?, ?, ?, ?, ?, ?)").run(title, snippet, date, readTime, content, nextSortOrder("posts"));
+    const { title, category, snippet, date, readTime, content } = req.body;
+    const info = sqlite.prepare("INSERT INTO posts (title, category, snippet, date, readTime, content, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?)").run(title, category || null, snippet, date, readTime, content, nextSortOrder("posts"));
     res.json({ id: info.lastInsertRowid });
   });
 
   app.put("/api/posts/:id", requireAuth, (req, res) => {
-    const { title, snippet, date, readTime, content } = req.body;
-    sqlite.prepare("UPDATE posts SET title=?, snippet=?, date=?, readTime=?, content=? WHERE id=?").run(title, snippet, date, readTime, content, req.params.id);
+    const { title, category, snippet, date, readTime, content } = req.body;
+    sqlite.prepare("UPDATE posts SET title=?, category=?, snippet=?, date=?, readTime=?, content=? WHERE id=?").run(title, category || null, snippet, date, readTime, content, req.params.id);
     res.json({ ok: true });
   });
 

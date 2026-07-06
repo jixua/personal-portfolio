@@ -1,0 +1,16 @@
+services:
+  personal-portfolio:
+    build: .
+    container_name: personal-portfolio
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-fallback_secret_key_12345}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-jixu0090@gmail.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-jixu201421}
+    ports:
+      - "31001:3001"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
