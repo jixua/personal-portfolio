@@ -97,6 +97,22 @@ body {
     padding: 0.25rem 0;
   }
 
+  .markdown-body.reading-markdown {
+    font-size: 1.13rem;
+    line-height: 1.9;
+  }
+
+  .markdown-body.reading-markdown p,
+  .markdown-body.reading-markdown li {
+    line-height: 2;
+  }
+
+  @media (max-width: 768px) {
+    .markdown-body.reading-markdown {
+      font-size: 1.05rem;
+    }
+  }
+
   .typora-live-editor {
     color: #1e293b;
     caret-color: #14b8a6;

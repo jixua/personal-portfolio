@@ -240,7 +240,7 @@ export function BlogPage({
 
       {/* Main Content Area */}
       <div className={`flex-1 bg-white md:ml-72 md:min-h-[calc(100vh-80px)] ${tocCollapsed ? "xl:mr-14" : "xl:mr-72"}`}>
-        <div className="max-w-4xl px-7 py-12 md:px-12 md:py-20 lg:px-20 xl:px-24 mx-auto">
+        <div className="max-w-5xl px-7 py-12 md:px-12 md:py-20 lg:px-16 xl:px-20 mx-auto">
           {activeTab === "docs" && activeDoc ? (
             <motion.div
               key={activeDoc.id}
@@ -253,7 +253,7 @@ export function BlogPage({
                 {activeDoc.title}
               </h1>
               <MarkdownRenderer
-                className="interview-markdown"
+                className="reading-markdown interview-markdown"
                 content={activeContent}
               />
             </motion.div>
@@ -273,7 +273,7 @@ export function BlogPage({
                 <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
                 <span>{activePost.readTime}</span>
               </div>
-              <MarkdownRenderer content={activeContent} />
+              <MarkdownRenderer className="reading-markdown" content={activeContent} />
             </motion.div>
           ) : (
             <div className="flex flex-col items-center justify-center h-[50vh] text-gray-400">
