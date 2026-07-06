@@ -15,23 +15,23 @@
 
 ## 项目截图
 
-以下截图来自 SQLite 中「个人作品集网站与内容管理系统」项目详情记录，图片已迁移到阿里云 OSS。
+以下截图来自 SQLite 中「个人作品集网站与内容管理系统」项目详情记录。
 
-![首页](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783168562239-689232357.png)
+![首页](assets/readme/home.png)
 
-![作品集列表](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783173143337-947659170.png)
+![作品集列表](assets/readme/projects.png)
 
-![项目详情](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783173163550-140082579.png)
+![项目详情](assets/readme/project-detail.png)
 
-![博客文章](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783168615143-331778274.png)
+![博客文章](assets/readme/blog.png)
 
-![面经知识库](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783168621283-586531558.png)
+![面经知识库](assets/readme/interview-notes.png)
 
-![后台总览](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783168634807-442742551.png)
+![后台总览](assets/readme/admin-dashboard.png)
 
-![作品管理](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783173207482-234656683.png)
+![作品管理](assets/readme/admin-projects.png)
 
-![项目编辑表单](https://qingluo-blog-oss.oss-cn-shanghai.aliyuncs.com/jixu/portfolio/uploads/1783173239369-232783931.png)
+![项目编辑表单](assets/readme/admin-project-form.png)
 
 ## 技术栈
 
