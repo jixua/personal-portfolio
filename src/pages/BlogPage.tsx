@@ -234,7 +234,7 @@ export function BlogPage({
       </aside>
 
       <main className="min-w-0 flex-1 md:ml-[280px] xl:mr-[280px]">
-        <div className="mx-auto w-full max-w-[760px] px-6 py-12 md:px-11 md:py-14">
+        <div className="mx-auto w-full max-w-[880px] px-6 py-12 md:px-11 md:py-14">
           {loading ? (
             <div className="flex h-[50vh] items-center justify-center text-sm font-medium text-gray-500">正在读取…</div>
           ) : activeTab === "docs" && activeDoc ? (
