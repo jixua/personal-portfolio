@@ -542,7 +542,7 @@ export function MarkdownRenderer({ content, className, showFrontmatter = false, 
       return (
         <div className={cx("not-prose my-8 rounded-xl border border-gray-200", editableTables ? "admin-preview-table-wrap" : "overflow-x-auto")}>
           <div className={editableTables ? "overflow-x-auto rounded-xl" : undefined}>
-            <table className={cx("w-full border-collapse text-sm", tableClassName)} {...props} />
+            <table className={cx("w-full border-collapse text-base leading-7 md:text-[17px]", tableClassName)} {...props} />
           </div>
           {editableTables && (
             <>
@@ -570,12 +570,19 @@ export function MarkdownRenderer({ content, className, showFrontmatter = false, 
       );
     },
     th: ({ node: _node, className: thClassName, children, ...props }) => (
-      <th className={cx("border-b border-gray-200 bg-gray-50 px-4 py-3 text-left font-bold text-gray-900", thClassName)} {...props}>
+      <th className={cx("border-b border-gray-200 bg-gray-50 px-5 py-4 text-left font-bold leading-7 text-gray-900", thClassName)} {...props}>
         <TableCellContent>{children}</TableCellContent>
       </th>
     ),
     td: ({ node: _node, className: tdClassName, children, ...props }) => (
-      <td className={cx("border-b border-gray-100 px-4 py-3 align-top text-gray-700 last:border-b-0", tdClassName)} {...props}>
+      <td
+        className={cx(
+          "border-b border-gray-100 px-5 py-4 align-top leading-7 text-gray-700 last:border-b-0",
+          "[&_li]:my-1 [&_ol]:my-2 [&_ol]:pl-5 [&_p]:my-0 [&_p+p]:mt-3 [&_ul]:my-2 [&_ul]:pl-5",
+          tdClassName,
+        )}
+        {...props}
+      >
         <TableCellContent>{children}</TableCellContent>
       </td>
     ),
