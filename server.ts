@@ -67,6 +67,120 @@ function getUploadObjectKey(filename: string) {
   return `${OSS_PREFIX}/${year}/${month}/${filename}`;
 }
 
+type ManagedAssetRef = {
+  id: string;
+  storage: "local" | "oss";
+  key: string;
+};
+
+type AssetCleanupSummary = {
+  deleted: number;
+  skippedInUse: number;
+  skippedUnavailable: number;
+  failed: number;
+};
+
+function stripUrlDecorations(value: string) {
+  return value.trim().replace(/^["'<]+|[>"')\s]+$/g, "");
+}
+
+function withoutQueryAndHash(value: string) {
+  return value.split(/[?#]/, 1)[0];
+}
+
+function safeDecodeURIComponent(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function isOssObjectKeyInManagedPrefix(objectKey: string) {
+  return objectKey === OSS_PREFIX || objectKey.startsWith(`${OSS_PREFIX}/`);
+}
+
+function getManagedAssetRef(rawValue: string): ManagedAssetRef | null {
+  const value = stripUrlDecorations(rawValue);
+  if (!value || value.startsWith("data:") || value.startsWith("blob:") || value.startsWith("uploading:")) return null;
+
+  const fromLocalPath = (pathname: string): ManagedAssetRef | null => {
+    if (!pathname.startsWith("/uploads/")) return null;
+    const key = safeDecodeURIComponent(pathname.slice("/uploads/".length));
+    if (!key || key.includes("\0")) return null;
+    return { id: `local:${key}`, storage: "local", key };
+  };
+
+  if (value.startsWith("/uploads/")) {
+    return fromLocalPath(withoutQueryAndHash(value));
+  }
+
+  if (!/^https?:\/\//i.test(value)) return null;
+
+  try {
+    const url = new URL(value);
+    const localRef = fromLocalPath(url.pathname);
+    if (localRef) return localRef;
+
+    if (OSS_PUBLIC_BASE_URL) {
+      const publicBase = new URL(OSS_PUBLIC_BASE_URL);
+      const basePath = publicBase.pathname.replace(/\/+$/g, "");
+      const isSameOrigin = url.origin === publicBase.origin;
+      const startsWithBasePath = basePath === "" || url.pathname === basePath || url.pathname.startsWith(`${basePath}/`);
+      if (isSameOrigin && startsWithBasePath) {
+        const objectKey = safeDecodeURIComponent(url.pathname.slice(basePath.length).replace(/^\/+/, ""));
+        if (isOssObjectKeyInManagedPrefix(objectKey)) return { id: `oss:${objectKey}`, storage: "oss", key: objectKey };
+      }
+    }
+
+    const bucket = process.env.ALI_OSS_BUCKET;
+    const region = process.env.ALI_OSS_REGION;
+    if (bucket && region && url.hostname === `${bucket}.${region}.aliyuncs.com`) {
+      const objectKey = safeDecodeURIComponent(url.pathname.replace(/^\/+/, ""));
+      if (isOssObjectKeyInManagedPrefix(objectKey)) return { id: `oss:${objectKey}`, storage: "oss", key: objectKey };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function extractManagedAssetRefsFromText(value: unknown) {
+  const refs = new Map<string, ManagedAssetRef>();
+  if (typeof value !== "string" || value.length === 0) return refs;
+
+  const addRef = (candidate: string | undefined) => {
+    if (!candidate) return;
+    const ref = getManagedAssetRef(candidate);
+    if (ref) refs.set(ref.id, ref);
+  };
+
+  for (const match of value.matchAll(/!\[[^\]]*]\(\s*([^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/g)) {
+    addRef(match[1]);
+  }
+  for (const match of value.matchAll(/<img\b[^>]*\bsrc=(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi)) {
+    addRef(match[1] || match[2] || match[3]);
+  }
+  for (const match of value.matchAll(/(?:https?:\/\/|\/uploads\/)[^\s"'<>]+/g)) {
+    addRef(match[0]);
+  }
+
+  return refs;
+}
+
+function collectManagedAssetRefsFromRows(rows: any[], fields: string[]) {
+  const refs = new Map<string, ManagedAssetRef>();
+  for (const row of rows) {
+    for (const field of fields) {
+      for (const [id, ref] of extractManagedAssetRefsFromText(row?.[field])) {
+        refs.set(id, ref);
+      }
+    }
+  }
+  return refs;
+}
+
 // Database Setup
 const sqlite = new Database(path.join(dataDir, "database.sqlite"));
 
@@ -189,6 +303,83 @@ function deleteDocRecursive(id: number) {
   const children = sqlite.prepare("SELECT id FROM docs WHERE parentId = ?").all(id) as { id: number }[];
   for (const c of children) deleteDocRecursive(c.id);
   sqlite.prepare("DELETE FROM docs WHERE id = ?").run(id);
+}
+
+function collectDocSubtreeRows(id: number): any[] {
+  const row = sqlite.prepare("SELECT * FROM docs WHERE id = ?").get(id) as any;
+  if (!row) return [];
+  const children = sqlite.prepare("SELECT id FROM docs WHERE parentId = ?").all(id) as { id: number }[];
+  return [row, ...children.flatMap((child) => collectDocSubtreeRows(child.id))];
+}
+
+function collectAllManagedAssetRefs() {
+  const refs = new Map<string, ManagedAssetRef>();
+  const addRefs = (nextRefs: Map<string, ManagedAssetRef>) => {
+    for (const [id, ref] of nextRefs) refs.set(id, ref);
+  };
+
+  addRefs(collectManagedAssetRefsFromRows(
+    sqlite.prepare("SELECT imageUrl, thumbnailUrl, description, longDescription, overview, detail, features FROM projects").all() as any[],
+    ["imageUrl", "thumbnailUrl", "description", "longDescription", "overview", "detail", "features"],
+  ));
+  addRefs(collectManagedAssetRefsFromRows(
+    sqlite.prepare("SELECT snippet, content FROM posts").all() as any[],
+    ["snippet", "content"],
+  ));
+  addRefs(collectManagedAssetRefsFromRows(
+    sqlite.prepare("SELECT content FROM docs").all() as any[],
+    ["content"],
+  ));
+  addRefs(collectManagedAssetRefsFromRows(
+    sqlite.prepare("SELECT description, achievements FROM experiences").all() as any[],
+    ["description", "achievements"],
+  ));
+
+  return refs;
+}
+
+async function deleteManagedAsset(ref: ManagedAssetRef) {
+  if (ref.storage === "local") {
+    const uploadRoot = path.resolve(uploadDir);
+    const target = path.resolve(uploadRoot, ref.key);
+    if (target === uploadRoot || !target.startsWith(`${uploadRoot}${path.sep}`)) {
+      throw new Error(`Refusing to delete outside uploads: ${ref.key}`);
+    }
+    await fs.promises.rm(target, { force: true });
+    return true;
+  }
+
+  const client = getOssClient();
+  if (!client) return false;
+  await (client as any).delete(ref.key);
+  return true;
+}
+
+async function cleanupUnusedManagedAssets(candidates: Map<string, ManagedAssetRef>): Promise<AssetCleanupSummary> {
+  const summary: AssetCleanupSummary = { deleted: 0, skippedInUse: 0, skippedUnavailable: 0, failed: 0 };
+  if (candidates.size === 0) return summary;
+
+  const refsStillInUse = collectAllManagedAssetRefs();
+  for (const [id, ref] of candidates) {
+    if (refsStillInUse.has(id)) {
+      summary.skippedInUse += 1;
+      continue;
+    }
+
+    try {
+      const deleted = await deleteManagedAsset(ref);
+      if (deleted) {
+        summary.deleted += 1;
+      } else {
+        summary.skippedUnavailable += 1;
+      }
+    } catch (error) {
+      summary.failed += 1;
+      console.error("Managed asset cleanup failed", ref, error);
+    }
+  }
+
+  return summary;
 }
 
 // 预置唯一管理员账号，并清理其他历史账号（注册已关闭，仅此账号可登录）
@@ -369,9 +560,15 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.delete("/api/projects/:id", requireAuth, (req, res) => {
+  app.delete("/api/projects/:id", requireAuth, async (req, res) => {
+    const project = sqlite.prepare("SELECT imageUrl, thumbnailUrl, description, longDescription, overview, detail, features FROM projects WHERE id=?").get(req.params.id) as any;
+    const assetCandidates = collectManagedAssetRefsFromRows(
+      project ? [project] : [],
+      ["imageUrl", "thumbnailUrl", "description", "longDescription", "overview", "detail", "features"],
+    );
     sqlite.prepare("DELETE FROM projects WHERE id=?").run(req.params.id);
-    res.json({ ok: true });
+    const cleanup = await cleanupUnusedManagedAssets(assetCandidates);
+    res.json({ ok: true, cleanup });
   });
 
   // Posts API
@@ -399,9 +596,12 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.delete("/api/posts/:id", requireAuth, (req, res) => {
+  app.delete("/api/posts/:id", requireAuth, async (req, res) => {
+    const post = sqlite.prepare("SELECT snippet, content FROM posts WHERE id=?").get(req.params.id) as any;
+    const assetCandidates = collectManagedAssetRefsFromRows(post ? [post] : [], ["snippet", "content"]);
     sqlite.prepare("DELETE FROM posts WHERE id=?").run(req.params.id);
-    res.json({ ok: true });
+    const cleanup = await cleanupUnusedManagedAssets(assetCandidates);
+    res.json({ ok: true, cleanup });
   });
 
   // Docs (面经体系) API —— 嵌套树形结构
@@ -463,9 +663,13 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.delete("/api/docs/:id", requireAuth, (req, res) => {
-    deleteDocRecursive(Number(req.params.id));
-    res.json({ ok: true });
+  app.delete("/api/docs/:id", requireAuth, async (req, res) => {
+    const docId = Number(req.params.id);
+    if (!Number.isFinite(docId)) return res.status(400).json({ error: "Invalid id" });
+    const assetCandidates = collectManagedAssetRefsFromRows(collectDocSubtreeRows(docId), ["content"]);
+    deleteDocRecursive(docId);
+    const cleanup = await cleanupUnusedManagedAssets(assetCandidates);
+    res.json({ ok: true, cleanup });
   });
 
   // Experiences (实践历程) API
