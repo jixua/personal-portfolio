@@ -116,7 +116,6 @@ export function BlogPage({
         ? activePost.content || `${activePost.snippet}\n\n*完整内容敬请期待...*`
         : "";
 
-  const inlineHeadings = useMemo(() => extractMarkdownHeadings(activeContent, [2]), [activeContent]);
   const outlineHeadings = useMemo(() => extractMarkdownHeadings(activeContent, [2, 3, 4]), [activeContent]);
   const flatItems: NavItem[] = useMemo(
     () => (activeTab === "docs" ? flattenDocs(knowledgeDocs).map((doc) => ({ id: doc.id, title: doc.title })) : blogPosts.map((post) => ({ id: post.id, title: post.title }))),
@@ -245,7 +244,6 @@ export function BlogPage({
               eyebrow={eyebrow}
               title={activeDoc.title}
               content={activeContent}
-              headings={inlineHeadings}
               prevItem={prevItem}
               nextItem={nextItem}
               onNavigate={openItem}
@@ -259,7 +257,6 @@ export function BlogPage({
               date={activePost.date}
               readTime={activePost.readTime}
               content={activeContent}
-              headings={inlineHeadings}
               prevItem={prevItem}
               nextItem={nextItem}
               onNavigate={openItem}
@@ -284,7 +281,6 @@ function ReaderArticle({
   date,
   readTime,
   content,
-  headings,
   prevItem,
   nextItem,
   onNavigate,
@@ -295,7 +291,6 @@ function ReaderArticle({
   date?: string;
   readTime?: string;
   content: string;
-  headings: ReturnType<typeof extractMarkdownHeadings>;
   prevItem: NavItem | null;
   nextItem: NavItem | null;
   onNavigate: (id: string) => void;
@@ -304,12 +299,10 @@ function ReaderArticle({
     accent === "teal"
       ? {
           eyebrow: "text-teal-600",
-          tocText: "text-teal-700",
           hover: "hover:border-teal-100 hover:text-teal-700",
         }
       : {
           eyebrow: "text-indigo-500",
-          tocText: "text-indigo-700",
           hover: "hover:border-indigo-100 hover:text-indigo-700",
         };
 
@@ -322,17 +315,6 @@ function ReaderArticle({
           <span>{date}</span>
           <span className="h-1 w-1 rounded-full bg-gray-300" />
           <span>{readTime}</span>
-        </div>
-      )}
-
-      {headings.length > 1 && (
-        <div className="mb-2 flex flex-wrap gap-2 rounded-2xl border border-gray-100 bg-gray-50 px-[18px] py-4">
-          <span className="mr-1 flex items-center font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-gray-400">本文目录</span>
-          {headings.map((heading) => (
-            <a key={`${heading.id}-${heading.line}`} href={`#${heading.id}`} className={`rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[13px] font-semibold no-underline transition-colors duration-200 ease-in-out ${accentClasses.tocText}`}>
-              {heading.text}
-            </a>
-          ))}
         </div>
       )}
 
@@ -391,7 +373,7 @@ function PublicHeadingToc({
             <a
               key={`${heading.id}-${heading.line}`}
               href={`#${heading.id}`}
-              className={`block rounded-lg py-2 pr-2 text-[13px] leading-6 text-gray-500 transition-colors duration-200 ease-in-out ${accentClass}`}
+              className={`block rounded-lg py-2.5 pr-2 text-[15px] leading-7 text-gray-500 transition-colors duration-200 ease-in-out ${accentClass}`}
               style={{ paddingLeft: `${Math.max(0, heading.level - 2) * 12 + 8}px` }}
             >
               <span className={heading.level === 2 ? "font-semibold text-gray-700" : ""}>{heading.text}</span>
