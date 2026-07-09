@@ -68,6 +68,79 @@ function editableLineParts(line: string) {
   return { type, prefix: "", text: line, toRaw: (value: string) => value };
 }
 
+type InlineToken =
+  | { type: "text"; raw: string; start: number; end: number }
+  | { type: "strong" | "em" | "delete" | "code"; id: string; raw: string; markerOpen: string; markerClose: string; text: string; start: number; end: number; innerStart: number; innerEnd: number }
+  | { type: "link"; id: string; raw: string; text: string; url: string; start: number; end: number; textStart: number; textEnd: number }
+  | { type: "image"; id: string; raw: string; alt: string; src: string; start: number; end: number; altStart: number; altEnd: number };
+
+function parseInlineTokens(text: string): InlineToken[] {
+  const tokens: InlineToken[] = [];
+  const pattern = /!\[([^\]]*)]\(([^)]+)\)|\[([^\]]+)]\(([^)]+)\)|`([^`\n]+)`|\*\*([^*\n]+)\*\*|~~([^~\n]+)~~|(^|[^*\w])\*([^*\n]+)\*(?!\*)/g;
+  let cursor = 0;
+  let count = 0;
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const raw = match[0];
+    if (start > cursor) tokens.push({ type: "text", raw: text.slice(cursor, start), start: cursor, end: start });
+    const id = `t-${start}-${count++}`;
+    if (match[1] !== undefined && match[2] !== undefined) {
+      tokens.push({ type: "image", id, raw, alt: match[1], src: match[2], start, end: start + raw.length, altStart: start + 2, altEnd: start + 2 + match[1].length });
+    } else if (match[3] !== undefined && match[4] !== undefined) {
+      tokens.push({ type: "link", id, raw, text: match[3], url: match[4], start, end: start + raw.length, textStart: start + 1, textEnd: start + 1 + match[3].length });
+    } else if (match[5] !== undefined) {
+      tokens.push({ type: "code", id, raw, markerOpen: "`", markerClose: "`", text: match[5], start, end: start + raw.length, innerStart: start + 1, innerEnd: start + 1 + match[5].length });
+    } else if (match[6] !== undefined) {
+      tokens.push({ type: "strong", id, raw, markerOpen: "**", markerClose: "**", text: match[6], start, end: start + raw.length, innerStart: start + 2, innerEnd: start + 2 + match[6].length });
+    } else if (match[7] !== undefined) {
+      tokens.push({ type: "delete", id, raw, markerOpen: "~~", markerClose: "~~", text: match[7], start, end: start + raw.length, innerStart: start + 2, innerEnd: start + 2 + match[7].length });
+    } else if (match[9] !== undefined) {
+      const leading = match[8] ?? "";
+      if (leading) tokens.push({ type: "text", raw: leading, start, end: start + leading.length });
+      tokens.push({ type: "em", id, raw: raw.slice(leading.length), markerOpen: "*", markerClose: "*", text: match[9], start: start + leading.length, end: start + raw.length, innerStart: start + leading.length + 1, innerEnd: start + leading.length + 1 + match[9].length });
+    }
+    cursor = start + raw.length;
+  }
+  if (cursor < text.length) tokens.push({ type: "text", raw: text.slice(cursor), start: cursor, end: text.length });
+  return tokens;
+}
+
+function tokenAtOffset(tokens: InlineToken[], offset: number) {
+  const token = tokens.find((item) => item.type !== "text" && offset >= item.start && offset <= item.end);
+  return token?.type === "text" ? null : token?.id ?? null;
+}
+
+function InlineTokenView({ token, active }: { token: InlineToken; active: boolean }) {
+  if (token.type === "text") return <>{token.raw}</>;
+  const className = active ? "le-md-token le-md-token-active" : "le-md-token";
+  if (token.type === "link") {
+    return (
+      <span className={className}>
+        <span className="le-md-marker">[</span><a className="le-md-link">{token.text}</a><span className="le-md-marker">]({token.url})</span>
+      </span>
+    );
+  }
+  if (token.type === "image") {
+    return (
+      <span className={className}>
+        <span className="le-md-marker">![</span><span className="le-md-image-alt">{token.alt || "图片"}</span><span className="le-md-marker">]({token.src})</span>
+      </span>
+    );
+  }
+  const inner = token.type === "strong"
+    ? <strong>{token.text}</strong>
+    : token.type === "em"
+      ? <em>{token.text}</em>
+      : token.type === "delete"
+        ? <del>{token.text}</del>
+        : <code className="le-inline-code">{token.text}</code>;
+  return (
+    <span className={className}>
+      <span className="le-md-marker">{token.markerOpen}</span>{inner}<span className="le-md-marker">{token.markerClose}</span>
+    </span>
+  );
+}
+
 function RawLine({
   line,
   startLine,
@@ -90,12 +163,19 @@ function RawLine({
   onPasteText: (event: React.ClipboardEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const [activeTokenId, setActiveTokenId] = useState<string | null>(null);
   const parts = editableLineParts(line);
+  const inlineTokens = useMemo(() => parseInlineTokens(parts.text), [parts.text]);
+  const updateActiveToken = () => {
+    if (!ref.current) return;
+    setActiveTokenId(tokenAtOffset(inlineTokens, getCaretOffset(ref.current)));
+  };
   useEffect(() => {
     if (focusNonce === 0) return;
     if (!ref.current) return;
     ref.current.focus();
     placeCaret(ref.current, caretHint);
+    updateActiveToken();
   }, [caretHint, focusNonce]);
 
   return (
@@ -106,14 +186,25 @@ function RawLine({
         contentEditable
         suppressContentEditableWarning
         spellCheck={false}
-        onFocus={() => onFocusLine(startLine)}
-        onInput={(event) => onInputCommit(event, startLine, parts.toRaw)}
-        onKeyDown={(event) => onKeyDown(event, startLine, parts.toRaw)}
+        onFocus={() => {
+          onFocusLine(startLine);
+          window.requestAnimationFrame(updateActiveToken);
+        }}
+        onMouseUp={updateActiveToken}
+        onKeyUp={updateActiveToken}
+        onInput={(event) => {
+          onInputCommit(event, startLine, parts.toRaw);
+          window.requestAnimationFrame(updateActiveToken);
+        }}
+        onKeyDown={(event) => {
+          onKeyDown(event, startLine, parts.toRaw);
+          window.requestAnimationFrame(updateActiveToken);
+        }}
         onBlur={(event) => onBlurCommit(event, startLine, parts.toRaw)}
         onPaste={(event) => onPasteText(event, startLine, parts.toRaw)}
         className={rawLineClass(line)}
       >
-        {parts.text}
+        {inlineTokens.map((token, index) => <InlineTokenView key={`${token.start}-${token.end}-${index}`} token={token} active={token.type !== "text" && token.id === activeTokenId} />)}
       </div>
     </div>
   );
