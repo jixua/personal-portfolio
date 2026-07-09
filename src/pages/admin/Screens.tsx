@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlignLeft, BookOpen, Briefcase, Building2, Calendar, CheckCircle2, ChevronDown, ChevronRight, Clock, Eye, FileText, Layers, Loader2, Plus, Save, Tag, Trash2, UploadCloud } from "lucide-react";
+import { AlignLeft, BookOpen, Briefcase, Building2, Calendar, CheckCircle2, ChevronDown, ChevronRight, Clock, Eye, FileText, GripVertical, Layers, Loader2, Plus, Save, Tag, Trash2, UploadCloud } from "lucide-react";
 import type { DocNode, Project } from "../../data";
 import { extractMarkdownHeadings, type MarkdownHeading } from "../../lib/markdown";
 import { LiveMarkdownEditor } from "./LiveMarkdownEditor";
@@ -230,15 +230,59 @@ export function BlogEditorScreen({
   onRefresh: () => Promise<void>;
 }) {
   const [activeId, setActiveId] = useState<number | null>(posts[0]?.id ?? null);
-  const active = posts.find((post) => post.id === activeId) ?? posts[0] ?? null;
+  const [optimisticPost, setOptimisticPost] = useState<ApiPost | null>(null);
+  const [draggingPostId, setDraggingPostId] = useState<number | null>(null);
+  const pendingPostIdRef = useRef<number | null>(null);
+  const visiblePosts = useMemo(() => optimisticPost && !posts.some((post) => post.id === optimisticPost.id) ? [optimisticPost, ...posts] : posts, [optimisticPost, posts]);
+  const active = activeId === null ? null : visiblePosts.find((post) => post.id === activeId) ?? null;
   const [form, setForm] = useState(() => postToForm(active));
   const [saving, setSaving] = useState(false);
   const [propsOpen, setPropsOpen] = useState(true);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractMarkdownHeadings(form.content, [1, 2, 3, 4]), [form.content]);
-  useEffect(() => { if (posts.length && !posts.some((post) => post.id === activeId)) setActiveId(posts[0].id); }, [posts, activeId]);
-  useEffect(() => setForm(postToForm(active)), [active?.id]);
+  useEffect(() => {
+    setActiveId((current) => {
+      if (current === null) return current;
+      if (posts.some((post) => post.id === current)) {
+        if (pendingPostIdRef.current === current) pendingPostIdRef.current = null;
+        if (optimisticPost?.id === current) setOptimisticPost(null);
+        return current;
+      }
+      if (pendingPostIdRef.current === current) return current;
+      return posts[0]?.id ?? null;
+    });
+  }, [optimisticPost?.id, posts]);
+  useEffect(() => { if (active) setForm(postToForm(active)); }, [active?.id]);
   const scrollToHeading = (heading: MarkdownHeading) => scrollEditorToHeading(contentScrollRef.current, heading.id);
+  const createPost = async () => {
+    const draft = newPostForm();
+    const created = await saveJson<{ id: number }>("/api/posts", "POST", token, draft);
+    const nextPost: ApiPost = {
+      id: created.id,
+      sortOrder: null,
+      title: draft.title,
+      category: draft.category,
+      snippet: draft.snippet,
+      date: draft.date,
+      readTime: draft.readTime,
+      content: draft.content,
+    };
+    pendingPostIdRef.current = created.id;
+    setOptimisticPost(nextPost);
+    setActiveId(created.id);
+    setForm(draft);
+    await onRefresh();
+  };
+  const reorderPosts = async (targetId: number, placement: "before" | "after") => {
+    if (draggingPostId === null || draggingPostId === targetId) return;
+    const ids = posts.map((post) => post.id);
+    if (!ids.includes(draggingPostId) || !ids.includes(targetId)) return;
+    const nextIds = ids.filter((id) => id !== draggingPostId);
+    const targetIndex = nextIds.indexOf(targetId);
+    nextIds.splice(placement === "after" ? targetIndex + 1 : targetIndex, 0, draggingPostId);
+    await saveJson("/api/posts/reorder", "PUT", token, { ids: nextIds });
+    await onRefresh();
+  };
   const save = async () => {
     if (!form.title.trim()) return;
     setSaving(true);
@@ -251,8 +295,33 @@ export function BlogEditorScreen({
   };
   return (
     <div className="grid h-full min-h-0 overflow-hidden grid-cols-[240px_minmax(0,1fr)_240px]">
-      <EditorList title="全部文章" addLabel="新建文章" count={posts.length} onAdd={() => { setActiveId(null); setForm(postToForm(null)); }}>
-        {posts.map((post) => <EditorListRow key={post.id} active={active?.id === post.id} title={post.title} meta={post.date ?? ""} accent="blog" onClick={() => setActiveId(post.id)} onDelete={async () => { if (confirm(`确定删除「${post.title}」吗？`)) { await fetch(`/api/posts/${post.id}`, { method: "DELETE", headers: authHeader(token) }); await onRefresh(); } }} />)}
+      <EditorList title="全部文章" addLabel="新建文章" count={visiblePosts.length} onAdd={createPost}>
+        {visiblePosts.map((post) => (
+          <EditorListRow
+            key={post.id}
+            active={active?.id === post.id}
+            title={post.title}
+            meta={post.date ?? ""}
+            accent="blog"
+            draggable={!optimisticPost || optimisticPost.id !== post.id}
+            dragging={draggingPostId === post.id}
+            onClick={() => setActiveId(post.id)}
+            onDelete={async () => { if (confirm(`确定删除「${post.title}」吗？`)) { await fetch(`/api/posts/${post.id}`, { method: "DELETE", headers: authHeader(token) }); await onRefresh(); } }}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", String(post.id));
+              setDraggingPostId(post.id);
+            }}
+            onDragOver={(event) => { if (draggingPostId !== null && draggingPostId !== post.id) event.preventDefault(); }}
+            onDrop={async (event) => {
+              event.preventDefault();
+              const rect = event.currentTarget.getBoundingClientRect();
+              await reorderPosts(post.id, event.clientY > rect.top + rect.height / 2 ? "after" : "before");
+              setDraggingPostId(null);
+            }}
+            onDragEnd={() => setDraggingPostId(null)}
+          />
+        ))}
       </EditorList>
       <main className="flex min-h-0 flex-col overflow-hidden">
         <EditorHeader
@@ -305,13 +374,23 @@ export function DocsEditorScreen({
   onRefresh: () => Promise<void>;
 }) {
   const [activeId, setActiveId] = useState<string | null>(firstLeaf(docs)?.id ?? null);
+  const pendingDocIdRef = useRef<string | null>(null);
   const active = activeId ? findDoc(docs, activeId) : null;
   const [form, setForm] = useState({ title: active?.title ?? "", content: active?.content ?? "" });
   const [saving, setSaving] = useState(false);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractMarkdownHeadings(form.content, [1, 2, 3, 4]), [form.content]);
-  useEffect(() => { if (!activeId) setActiveId(firstLeaf(docs)?.id ?? null); }, [docs, activeId]);
-  useEffect(() => setForm({ title: active?.title ?? "", content: active?.content ?? "" }), [active?.id]);
+  useEffect(() => {
+    setActiveId((current) => {
+      if (current && findDoc(docs, current)) {
+        if (pendingDocIdRef.current === current) pendingDocIdRef.current = null;
+        return current;
+      }
+      if (current && pendingDocIdRef.current === current) return current;
+      return firstLeaf(docs)?.id ?? null;
+    });
+  }, [docs]);
+  useEffect(() => { if (active && !active.isFolder) setForm({ title: active.title, content: active.content ?? "" }); }, [active?.id]);
   const scrollToHeading = (heading: MarkdownHeading) => scrollEditorToHeading(contentScrollRef.current, heading.id);
   const save = async () => {
     if (!form.title.trim()) return;
@@ -324,8 +403,18 @@ export function DocsEditorScreen({
     }
   };
   const createDoc = async (parentId: string | null, isFolder: boolean) => {
-    const title = isFolder ? "未命名目录" : "未命名文档";
-    await saveJson("/api/docs", "POST", token, { parentId, title, isFolder, content: "" });
+    const title = isFolder ? "未命名目录" : "新建文档";
+    const created = await saveJson<{ id: number }>("/api/docs", "POST", token, { parentId, title, isFolder, content: "" });
+    if (!isFolder) {
+      const nextId = String(created.id);
+      pendingDocIdRef.current = nextId;
+      setActiveId(nextId);
+      setForm({ title, content: "" });
+    }
+    await onRefresh();
+  };
+  const move = async (movedId: string, newParentId: string | null, oldSiblingIds: string[], newSiblingIds: string[]) => {
+    await saveJson("/api/docs/move", "PUT", token, { movedId, newParentId, oldSiblingIds, newSiblingIds });
     await onRefresh();
   };
   const rename = async (node: DocNode, title: string) => {
@@ -341,7 +430,7 @@ export function DocsEditorScreen({
   return (
     <div className="grid h-full min-h-0 overflow-hidden grid-cols-[240px_minmax(0,1fr)_240px]">
       <aside className="h-full min-h-0 overflow-y-auto border-r border-gray-100 px-3 py-[18px]">
-        <DocsTree docs={docs} activeId={activeId} onSelect={(node) => setActiveId(node.id)} onNewRoot={(isFolder) => createDoc(null, isFolder)} onNewChild={(parentId, isFolder) => createDoc(parentId, isFolder)} onRename={rename} onDelete={remove} />
+        <DocsTree docs={docs} activeId={activeId} onSelect={(node) => setActiveId(node.id)} onNewRoot={(isFolder) => createDoc(null, isFolder)} onNewChild={(parentId, isFolder) => createDoc(parentId, isFolder)} onRename={rename} onDelete={remove} onMove={move} />
       </aside>
       <main className="flex min-h-0 flex-col overflow-hidden">
         <EditorHeader
@@ -421,9 +510,52 @@ function ExperiencePreview({ form }: { form: ReturnType<typeof experienceToForm>
 function EditorList({ title, count, addLabel, onAdd, children }: { title: string; count: number; addLabel: string; onAdd: () => void; children: React.ReactNode }) {
   return <aside className="h-full min-h-0 overflow-y-auto border-r border-gray-100 px-3 py-[18px]"><button type="button" onClick={onAdd} className="mb-3.5 flex w-full items-center justify-center gap-1.5 rounded-[9px] border border-gray-200 bg-white px-2.5 py-2 text-[12.5px] font-bold text-gray-600 hover:bg-gray-50"><Plus className="h-[13px] w-[13px]" />{addLabel}</button><div className="px-1 pb-2 font-mono text-[10px] font-bold uppercase tracking-widest text-gray-400">{title} · {count}</div>{children}</aside>;
 }
-function EditorListRow({ active, title, meta, accent, onClick, onDelete }: { active: boolean; title: string; meta: string; accent: "blog" | "docs"; onClick: () => void; onDelete: () => void }) {
+function EditorListRow({
+  active,
+  title,
+  meta,
+  accent,
+  draggable = false,
+  dragging = false,
+  onClick,
+  onDelete,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: {
+  active: boolean;
+  title: string;
+  meta: string;
+  accent: "blog" | "docs";
+  draggable?: boolean;
+  dragging?: boolean;
+  onClick: () => void;
+  onDelete: () => void;
+  onDragStart?: React.DragEventHandler<HTMLDivElement>;
+  onDragOver?: React.DragEventHandler<HTMLDivElement>;
+  onDrop?: React.DragEventHandler<HTMLDivElement>;
+  onDragEnd?: React.DragEventHandler<HTMLDivElement>;
+}) {
   const activeClass = accent === "docs" ? "bg-[color-mix(in_oklab,var(--seal)_10%,white)] text-[var(--seal)]" : "bg-[var(--signal-indigo-50)] text-[var(--signal-indigo-600)]";
-  return <div onClick={onClick} className={`group mb-0.5 flex cursor-pointer items-start gap-2 rounded-[9px] px-2.5 py-2.5 ${active ? activeClass : "text-gray-700 hover:bg-gray-50"}`}><div className="min-w-0 flex-1"><div className="truncate font-display text-[13px] font-bold">{title}</div><div className="mt-0.5 truncate font-mono text-[10.5px] text-gray-400">{meta || "未设置"}</div></div><button type="button" onClick={(event) => { event.stopPropagation(); onDelete(); }} className="rounded-md p-1 text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button></div>;
+  return (
+    <div
+      draggable={draggable}
+      onClick={onClick}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      className={`group mb-0.5 flex cursor-pointer items-start gap-2 rounded-[9px] px-2.5 py-2.5 transition-opacity ${active ? activeClass : "text-gray-700 hover:bg-gray-50"} ${dragging ? "opacity-45" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+    >
+      <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100" />
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-display text-[13px] font-bold">{title}</div>
+        <div className="mt-0.5 truncate font-mono text-[10.5px] text-gray-400">{meta || "未设置"}</div>
+      </div>
+      <button type="button" onClick={(event) => { event.stopPropagation(); onDelete(); }} className="rounded-md p-1 text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
+    </div>
+  );
 }
 function EditorHeader({
   title,
@@ -521,10 +653,14 @@ function experienceToForm(item: ApiExperience | null) {
 function postToForm(post: ApiPost | null) {
   return { title: post?.title ?? "", category: post?.category ?? "", snippet: post?.snippet ?? "", date: post?.date ?? new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" }), readTime: post?.readTime ?? "5 分钟阅读", content: post?.content ?? "" };
 }
+function newPostForm() {
+  return { ...postToForm(null), title: "新建文章" };
+}
 function authHeader(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
-async function saveJson(url: string, method: "POST" | "PUT", token: string, body: unknown) {
+async function saveJson<T = unknown>(url: string, method: "POST" | "PUT", token: string, body: unknown): Promise<T> {
   const response = await fetch(url, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "保存失败");
+  return (await response.json().catch(() => undefined)) as T;
 }

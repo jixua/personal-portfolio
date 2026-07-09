@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, FilePlus, FileText, Folder, FolderOpen, FolderPlus, Pencil, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FilePlus, FileText, Folder, FolderOpen, FolderPlus, GripVertical, Pencil, Trash2 } from "lucide-react";
 import type { DocNode } from "../../data";
 
 type MenuState = { x: number; y: number; node: DocNode } | null;
+type SiblingInfo = { parentId: string | null; siblings: DocNode[] };
 
 export function DocsTree({
   docs,
@@ -12,6 +13,7 @@ export function DocsTree({
   onNewChild,
   onRename,
   onDelete,
+  onMove,
 }: {
   docs: DocNode[];
   activeId: string | null;
@@ -20,12 +22,15 @@ export function DocsTree({
   onNewChild: (parentId: string, isFolder: boolean) => void;
   onRename: (node: DocNode, title: string) => void;
   onDelete: (node: DocNode) => void;
+  onMove: (movedId: string, newParentId: string | null, oldSiblingIds: string[], newSiblingIds: string[]) => void;
 }) {
   const folderIds = useMemo(() => collectFolders(docs), [docs]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(folderIds));
   const [menu, setMenu] = useState<MenuState>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
   useEffect(() => setExpanded((current) => new Set([...current, ...folderIds])), [folderIds]);
   useEffect(() => {
@@ -44,6 +49,23 @@ export function DocsTree({
     const title = renameValue.trim();
     setRenamingId(null);
     if (title && title !== node.title) onRename(node, title);
+  };
+
+  const moveAround = (movedId: string, targetId: string, placement: "before" | "after") => {
+    if (movedId === targetId) return;
+    const source = findSiblingInfo(docs, movedId);
+    const target = findSiblingInfo(docs, targetId);
+    if (!source || !target) return;
+    if (target.parentId && isDescendant(docs, movedId, target.parentId)) return;
+
+    const oldSiblingIds = source.siblings.map((node) => node.id).filter((id) => id !== movedId);
+    const newSiblingIds = target.siblings.map((node) => node.id).filter((id) => id !== movedId);
+    const targetIndex = newSiblingIds.indexOf(targetId);
+    if (targetIndex < 0) return;
+    const insertIndex = placement === "after" ? targetIndex + 1 : targetIndex;
+    newSiblingIds.splice(insertIndex, 0, movedId);
+    if (source.parentId === target.parentId && oldSiblingIds.join("\0") === newSiblingIds.filter((id) => id !== movedId).join("\0") && source.siblings.findIndex((node) => node.id === movedId) === insertIndex) return;
+    onMove(movedId, target.parentId, oldSiblingIds, newSiblingIds);
   };
 
   return (
@@ -73,6 +95,11 @@ export function DocsTree({
             setRenameValue={setRenameValue}
             startRename={startRename}
             submitRename={submitRename}
+            draggingId={draggingId}
+            dropTargetId={dropTargetId}
+            setDraggingId={setDraggingId}
+            setDropTargetId={setDropTargetId}
+            moveAround={moveAround}
           />
         ))}
       </div>
@@ -107,6 +134,11 @@ function TreeNode({
   renameValue,
   setRenameValue,
   submitRename,
+  draggingId,
+  dropTargetId,
+  setDraggingId,
+  setDropTargetId,
+  moveAround,
 }: {
   node: DocNode;
   depth: number;
@@ -120,9 +152,16 @@ function TreeNode({
   setRenameValue: (value: string) => void;
   startRename: (node: DocNode) => void;
   submitRename: (node: DocNode) => void;
+  draggingId: string | null;
+  dropTargetId: string | null;
+  setDraggingId: React.Dispatch<React.SetStateAction<string | null>>;
+  setDropTargetId: React.Dispatch<React.SetStateAction<string | null>>;
+  moveAround: (movedId: string, targetId: string, placement: "before" | "after") => void;
 }) {
   const isOpen = expanded.has(node.id);
   const active = activeId === node.id;
+  const dragging = draggingId === node.id;
+  const dropping = dropTargetId === node.id && draggingId !== null && draggingId !== node.id;
   const toggle = () => setExpanded((current) => {
     const next = new Set(current);
     if (next.has(node.id)) next.delete(node.id);
@@ -133,14 +172,41 @@ function TreeNode({
   return (
     <div>
       <div
+        draggable={renamingId !== node.id}
         onClick={() => node.isFolder ? toggle() : onSelect(node)}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", node.id);
+          setDraggingId(node.id);
+          setDropTargetId(null);
+        }}
+        onDragOver={(event) => {
+          if (draggingId && draggingId !== node.id) {
+            event.preventDefault();
+            setDropTargetId(node.id);
+          }
+        }}
+        onDragLeave={() => setDropTargetId((current) => current === node.id ? null : current)}
+        onDrop={(event) => {
+          event.preventDefault();
+          const movedId = draggingId || event.dataTransfer.getData("text/plain");
+          const rect = event.currentTarget.getBoundingClientRect();
+          if (movedId) moveAround(movedId, node.id, event.clientY > rect.top + rect.height / 2 ? "after" : "before");
+          setDraggingId(null);
+          setDropTargetId(null);
+        }}
+        onDragEnd={() => {
+          setDraggingId(null);
+          setDropTargetId(null);
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
           onContextMenu({ x: event.clientX, y: event.clientY, node });
         }}
-        className={`flex cursor-pointer items-center gap-1.5 rounded-[9px] px-2 py-1.5 text-[13px] transition-colors ${active ? "bg-[color-mix(in_oklab,var(--seal)_10%,white)] font-bold text-[var(--seal)]" : "text-gray-600 hover:bg-gray-50"}`}
+        className={`group flex cursor-pointer items-center gap-1.5 rounded-[9px] px-2 py-1.5 text-[13px] transition-colors ${active ? "bg-[color-mix(in_oklab,var(--seal)_10%,white)] font-bold text-[var(--seal)]" : "text-gray-600 hover:bg-gray-50"} ${dragging ? "opacity-45" : ""} ${dropping ? "ring-1 ring-[var(--seal)]" : ""}`}
         style={{ paddingLeft: 8 + depth * 14 }}
       >
+        <GripVertical className="h-3 w-3 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100" />
         {node.isFolder ? (
           <>
             {isOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />}
@@ -184,6 +250,11 @@ function TreeNode({
           setRenameValue={setRenameValue}
           startRename={() => {}}
           submitRename={submitRename}
+          draggingId={draggingId}
+          dropTargetId={dropTargetId}
+          setDraggingId={setDraggingId}
+          setDropTargetId={setDropTargetId}
+          moveAround={moveAround}
         />
       ))}
     </div>
@@ -197,3 +268,25 @@ function collectFolders(nodes: DocNode[]): string[] {
   ]);
 }
 
+function findSiblingInfo(nodes: DocNode[], id: string, parentId: string | null = null): SiblingInfo | null {
+  if (nodes.some((node) => node.id === id)) return { parentId, siblings: nodes };
+  for (const node of nodes) {
+    const found = findSiblingInfo(node.children ?? [], id, node.id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findNode(nodes: DocNode[], id: string): DocNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const child = findNode(node.children ?? [], id);
+    if (child) return child;
+  }
+  return null;
+}
+
+function isDescendant(nodes: DocNode[], ancestorId: string, possibleChildId: string): boolean {
+  const ancestor = findNode(nodes, ancestorId);
+  return ancestor ? Boolean(findNode(ancestor.children ?? [], possibleChildId)) : false;
+}
