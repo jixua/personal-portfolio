@@ -30,6 +30,29 @@ function placeCaret(el: HTMLElement, offset?: number | null) {
   selection?.addRange(range);
 }
 
+function editableLineParts(line: string) {
+  const type = classifyLine(line);
+  if (type.type === "heading") {
+    const prefix = `${"#".repeat(type.level)} `;
+    return { type, prefix, text: type.text, toRaw: (value: string) => `${prefix}${value}` };
+  }
+  if (type.type === "quote") return { type, prefix: "> ", text: type.text, toRaw: (value: string) => `> ${value}` };
+  if (type.type === "ul") {
+    const indent = " ".repeat(type.indent);
+    return { type, prefix: `${indent}- `, text: type.text, toRaw: (value: string) => `${indent}- ${value}` };
+  }
+  if (type.type === "ol") {
+    const indent = " ".repeat(type.indent);
+    return { type, prefix: `${indent}${type.num}. `, text: type.text, toRaw: (value: string) => `${indent}${type.num}. ${value}` };
+  }
+  if (type.type === "checkbox") {
+    const indent = " ".repeat(type.indent);
+    const marker = `- [${type.checked ? "x" : " "}] `;
+    return { type, prefix: `${indent}${marker}`, text: type.text, toRaw: (value: string) => `${indent}${marker}${value}` };
+  }
+  return { type, prefix: "", text: line, toRaw: (value: string) => value };
+}
+
 function RawLine({
   line,
   startLine,
@@ -40,10 +63,11 @@ function RawLine({
   line: string;
   startLine: number;
   caretHint: number | null;
-  onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, line: number) => void;
-  onBlurCommit: (event: React.FocusEvent<HTMLDivElement>, line: number) => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
+  onBlurCommit: (event: React.FocusEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const parts = editableLineParts(line);
   useEffect(() => {
     if (!ref.current) return;
     ref.current.focus();
@@ -51,25 +75,28 @@ function RawLine({
   }, [caretHint]);
 
   return (
-    <div
-      ref={ref}
-      contentEditable
-      suppressContentEditableWarning
-      spellCheck={false}
-      onKeyDown={(event) => onKeyDown(event, startLine)}
-      onBlur={(event) => onBlurCommit(event, startLine)}
-      onPaste={(event) => {
-        event.preventDefault();
-        document.execCommand("insertText", false, event.clipboardData.getData("text/plain").replace(/\n/g, " "));
-      }}
-      className={rawLineClass(line)}
-    >
-      {line}
+    <div className={rawLineFrameClass(line)}>
+      {parts.prefix && <span className="select-none whitespace-pre font-mono text-[0.72em] font-semibold text-gray-300">{parts.prefix}</span>}
+      <div
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        spellCheck={false}
+        onKeyDown={(event) => onKeyDown(event, startLine, parts.toRaw)}
+        onBlur={(event) => onBlurCommit(event, startLine, parts.toRaw)}
+        onPaste={(event) => {
+          event.preventDefault();
+          document.execCommand("insertText", false, event.clipboardData.getData("text/plain").replace(/\n/g, " "));
+        }}
+        className={rawLineClass(line)}
+      >
+        {parts.text}
+      </div>
     </div>
   );
 }
 
-function RawBlock({ text, onCommit }: { text: string; onCommit: (value: string) => void }) {
+function RawBlock({ text, type, onCommit }: { text: string; type: "code" | "table"; onCommit: (value: string) => void }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     const textarea = ref.current;
@@ -89,19 +116,29 @@ function RawBlock({ text, onCommit }: { text: string; onCommit: (value: string) 
         event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
       }}
       spellCheck={false}
-      className="my-3 block w-full resize-none rounded-xl border border-gray-200 bg-[#1e2430] px-4 py-3 font-mono text-[13px] leading-7 text-[#dbe2f0] outline-none"
+      className={`admin-raw-block my-4 block w-full resize-none rounded-xl border px-4 py-3 font-mono text-[14px] leading-7 outline-none transition-colors ${type === "code" ? "border-slate-200 bg-slate-50 text-slate-800 focus:border-indigo-200 focus:bg-white" : "border-gray-200 bg-white text-gray-700 focus:border-indigo-200"}`}
     />
   );
+}
+
+function rawLineFrameClass(line: string) {
+  const type = classifyLine(line);
+  const base = "group -mx-2 flex items-baseline gap-2 rounded-lg border border-transparent px-2 transition-colors focus-within:border-indigo-100 focus-within:bg-indigo-50/25";
+  if (type.type === "heading") return `${base} my-3`;
+  if (type.type === "quote") return `${base} my-3 border-l-2 border-l-indigo-200 bg-indigo-50/20`;
+  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return `${base} my-1.5`;
+  return `${base} my-1.5`;
 }
 
 function rawLineClass(line: string) {
   const type = classifyLine(line);
   if (type.type === "heading") {
     const size = type.level === 1 ? "text-[30px]" : type.level === 2 ? "text-2xl" : type.level === 3 ? "text-xl" : "text-base";
-    return `my-3 min-h-[1.4em] whitespace-pre-wrap break-words font-display font-extrabold text-gray-900 outline-none ${size}`;
+    return `min-w-0 flex-1 whitespace-pre-wrap break-words font-display font-extrabold text-gray-900 outline-none ${size}`;
   }
-  if (type.type === "quote") return "my-3 min-h-[1.4em] rounded-r-lg bg-gray-50 px-4 py-2 text-[15px] leading-7 text-gray-600 outline-none";
-  return "my-2 min-h-[1.4em] whitespace-pre-wrap break-words text-base leading-8 text-gray-700 outline-none";
+  if (type.type === "quote") return "min-w-0 flex-1 py-2 text-[15px] leading-7 text-gray-600 outline-none";
+  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return "min-w-0 flex-1 whitespace-pre-wrap break-words text-base leading-8 text-gray-700 outline-none";
+  return "min-w-0 flex-1 whitespace-pre-wrap break-words text-base leading-8 text-gray-700 outline-none";
 }
 
 function PreviewShell({ markdown, line, onFocus }: { markdown: string; line: number; onFocus: (line: number) => void }) {
@@ -171,13 +208,13 @@ export function LiveMarkdownEditor({
     if (nextFocus !== undefined) setFocusLine(nextFocus);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, startLine: number) => {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
     if (event.key === "Enter") {
       event.preventDefault();
       const offset = getCaretOffset(event.currentTarget);
       const text = event.currentTarget.textContent || "";
       const next = [...lines];
-      next[startLine] = text.slice(0, offset);
+      next[startLine] = toRaw(text.slice(0, offset));
       next.splice(startLine + 1, 0, text.slice(offset));
       commit(next, startLine + 1, 0);
     } else if (event.key === "Backspace") {
@@ -186,14 +223,14 @@ export function LiveMarkdownEditor({
         event.preventDefault();
         const next = [...lines];
         const prevLen = next[startLine - 1].length;
-        next[startLine - 1] += event.currentTarget.textContent || "";
+        next[startLine - 1] += toRaw(event.currentTarget.textContent || "");
         next.splice(startLine, 1);
         commit(next, startLine - 1, prevLen);
       }
     } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       event.preventDefault();
       const next = [...lines];
-      next[startLine] = event.currentTarget.textContent || "";
+      next[startLine] = toRaw(event.currentTarget.textContent || "");
       const target = startLine + (event.key === "ArrowUp" ? -1 : 1);
       commit(next, target >= 0 && target < next.length ? target : startLine, null);
     } else if (event.key === "Escape") {
@@ -201,9 +238,9 @@ export function LiveMarkdownEditor({
     }
   };
 
-  const handleBlurCommit = (event: React.FocusEvent<HTMLDivElement>, startLine: number) => {
+  const handleBlurCommit = (event: React.FocusEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
     const next = [...lines];
-    next[startLine] = event.currentTarget.textContent || "";
+    next[startLine] = toRaw(event.currentTarget.textContent || "");
     setLines(next);
     setFocusLine((current) => (current === startLine ? null : current));
   };
@@ -273,6 +310,7 @@ export function LiveMarkdownEditor({
             return (
               <RawBlock
                 key={`edit-${block.startLine}`}
+                type={block.type}
                 text={lines.slice(block.startLine, block.endLine + 1).join("\n")}
                 onCommit={(value) => {
                   const next = [...lines];
