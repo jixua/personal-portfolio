@@ -9,10 +9,15 @@ function getCaretOffset(el: HTMLElement) {
   const selection = window.getSelection();
   if (!selection?.rangeCount) return (el.textContent || "").length;
   const range = selection.getRangeAt(0);
+  if (!el.contains(range.endContainer)) return (el.textContent || "").length;
   const preRange = range.cloneRange();
-  preRange.selectNodeContents(el);
-  preRange.setEnd(range.endContainer, range.endOffset);
-  return preRange.toString().length;
+  try {
+    preRange.selectNodeContents(el);
+    preRange.setEnd(range.endContainer, range.endOffset);
+    return preRange.toString().length;
+  } catch {
+    return (el.textContent || "").length;
+  }
 }
 
 function getSelectionOffsets(el: HTMLElement) {
@@ -20,29 +25,50 @@ function getSelectionOffsets(el: HTMLElement) {
   const selection = window.getSelection();
   if (!selection?.rangeCount) return { start: fallback, end: fallback };
   const range = selection.getRangeAt(0);
+  if (!el.contains(range.startContainer) || !el.contains(range.endContainer)) return { start: fallback, end: fallback };
   const contents = document.createRange();
   contents.selectNodeContents(el);
 
-  const startRange = contents.cloneRange();
-  startRange.setEnd(range.startContainer, range.startOffset);
-  const endRange = contents.cloneRange();
-  endRange.setEnd(range.endContainer, range.endOffset);
-  return { start: startRange.toString().length, end: endRange.toString().length };
+  try {
+    const startRange = contents.cloneRange();
+    startRange.setEnd(range.startContainer, range.startOffset);
+    const endRange = contents.cloneRange();
+    endRange.setEnd(range.endContainer, range.endOffset);
+    return { start: startRange.toString().length, end: endRange.toString().length };
+  } catch {
+    return { start: fallback, end: fallback };
+  }
 }
 
 function placeCaret(el: HTMLElement, offset?: number | null) {
   const len = (el.textContent || "").length;
   const nextOffset = offset == null ? len : Math.max(0, Math.min(offset, len));
   const range = document.createRange();
-  if (el.firstChild && el.firstChild.nodeType === 3) {
-    range.setStart(el.firstChild, nextOffset);
-  } else {
-    range.selectNodeContents(el);
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  let remaining = nextOffset;
+  while (node) {
+    const length = node.textContent?.length ?? 0;
+    if (remaining <= length) {
+      range.setStart(node, remaining);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return;
+    }
+    remaining -= length;
+    node = walker.nextNode();
   }
-  range.collapse(true);
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
+  try {
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  } catch {
+    el.focus();
+  }
 }
 
 function editableLineParts(line: string) {
