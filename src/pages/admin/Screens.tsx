@@ -29,6 +29,13 @@ function findDoc(nodes: DocNode[], id: string): DocNode | null {
   return null;
 }
 
+function findEditableDoc(nodes: DocNode[], id: string | null): DocNode | null {
+  if (!id) return null;
+  const node = findDoc(nodes, id);
+  if (!node) return null;
+  return node.isFolder ? firstLeaf(node.children ?? []) : node;
+}
+
 export function OverviewScreen({
   projects,
   posts,
@@ -375,28 +382,36 @@ export function DocsEditorScreen({
 }) {
   const [activeId, setActiveId] = useState<string | null>(firstLeaf(docs)?.id ?? null);
   const pendingDocIdRef = useRef<string | null>(null);
-  const active = activeId ? findDoc(docs, activeId) : null;
+  const active = findEditableDoc(docs, activeId);
   const [form, setForm] = useState({ title: active?.title ?? "", content: active?.content ?? "" });
   const [saving, setSaving] = useState(false);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractMarkdownHeadings(form.content, [1, 2, 3, 4]), [form.content]);
   useEffect(() => {
     setActiveId((current) => {
-      if (current && findDoc(docs, current)) {
-        if (pendingDocIdRef.current === current) pendingDocIdRef.current = null;
-        return current;
+      const editable = findEditableDoc(docs, current);
+      if (editable) {
+        if (pendingDocIdRef.current === editable.id) pendingDocIdRef.current = null;
+        return editable.id;
       }
       if (current && pendingDocIdRef.current === current) return current;
       return firstLeaf(docs)?.id ?? null;
     });
   }, [docs]);
-  useEffect(() => { if (active && !active.isFolder) setForm({ title: active.title, content: active.content ?? "" }); }, [active?.id]);
+  useEffect(() => {
+    if (active) {
+      setForm({ title: active.title, content: active.content ?? "" });
+    } else {
+      setForm({ title: "", content: "" });
+    }
+  }, [active?.id]);
   const scrollToHeading = (heading: MarkdownHeading) => scrollEditorToHeading(contentScrollRef.current, heading.id);
   const save = async () => {
     if (!form.title.trim()) return;
+    if (!active) return;
     setSaving(true);
     try {
-      await saveJson(active ? `/api/docs/${active.id}` : "/api/docs", active ? "PUT" : "POST", token, active ? form : { ...form, parentId: null, isFolder: false });
+      await saveJson(`/api/docs/${active.id}`, "PUT", token, form);
       await onRefresh();
     } finally {
       setSaving(false);
@@ -439,7 +454,7 @@ export function DocsEditorScreen({
           saving={saving}
           accent="docs"
           onSave={save}
-          canSave={!!form.title.trim()}
+          canSave={!!active && !!form.title.trim()}
           pendingImportCount={pendingImportCount}
           importMarkdown={(files) => importMarkdown(files, (markdown, file) => setForm((current) => ({ ...current, content: markdown, title: current.title || file.name.replace(/\.(md|markdown)$/i, "") })))}
           requestAssetDirectory={requestAssetDirectory}

@@ -185,14 +185,26 @@ export function LiveMarkdownEditor({
   const caretHintRef = useRef<number | null>(null);
   const lastFocusedRef = useRef<number | null>(null);
   const onChangeRef = useRef(onChange);
+  const skipNextChangeRef = useRef(false);
   onChangeRef.current = onChange;
 
   useEffect(() => {
-    setLines((value || "").split("\n"));
+    const nextLines = (value || "").split("\n");
+    caretHintRef.current = null;
+    lastFocusedRef.current = null;
     setFocusLine(null);
-  }, [docKey]);
+    setLines((current) => {
+      if (current.join("\n") === nextLines.join("\n")) return current;
+      skipNextChangeRef.current = true;
+      return nextLines;
+    });
+  }, [docKey, value]);
 
   useEffect(() => {
+    if (skipNextChangeRef.current) {
+      skipNextChangeRef.current = false;
+      return;
+    }
     onChangeRef.current(lines.join("\n"));
   }, [lines]);
 
