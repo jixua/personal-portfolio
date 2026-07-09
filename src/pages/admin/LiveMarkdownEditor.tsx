@@ -15,6 +15,21 @@ function getCaretOffset(el: HTMLElement) {
   return preRange.toString().length;
 }
 
+function getSelectionOffsets(el: HTMLElement) {
+  const fallback = (el.textContent || "").length;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return { start: fallback, end: fallback };
+  const range = selection.getRangeAt(0);
+  const contents = document.createRange();
+  contents.selectNodeContents(el);
+
+  const startRange = contents.cloneRange();
+  startRange.setEnd(range.startContainer, range.startOffset);
+  const endRange = contents.cloneRange();
+  endRange.setEnd(range.endContainer, range.endOffset);
+  return { start: startRange.toString().length, end: endRange.toString().length };
+}
+
 function placeCaret(el: HTMLElement, offset?: number | null) {
   const len = (el.textContent || "").length;
   const nextOffset = offset == null ? len : Math.max(0, Math.min(offset, len));
@@ -59,12 +74,14 @@ function RawLine({
   caretHint,
   onKeyDown,
   onBlurCommit,
+  onPasteText,
 }: {
   line: string;
   startLine: number;
   caretHint: number | null;
   onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
   onBlurCommit: (event: React.FocusEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
+  onPasteText: (event: React.ClipboardEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const parts = editableLineParts(line);
@@ -84,10 +101,7 @@ function RawLine({
         spellCheck={false}
         onKeyDown={(event) => onKeyDown(event, startLine, parts.toRaw)}
         onBlur={(event) => onBlurCommit(event, startLine, parts.toRaw)}
-        onPaste={(event) => {
-          event.preventDefault();
-          document.execCommand("insertText", false, event.clipboardData.getData("text/plain").replace(/\n/g, " "));
-        }}
+        onPaste={(event) => onPasteText(event, startLine, parts.toRaw)}
         className={rawLineClass(line)}
       >
         {parts.text}
@@ -257,6 +271,33 @@ export function LiveMarkdownEditor({
     setFocusLine((current) => (current === startLine ? null : current));
   };
 
+  const handlePasteText = (event: React.ClipboardEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
+    const text = event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");
+    if (!text) return;
+    event.preventDefault();
+
+    if (!text.includes("\n")) {
+      document.execCommand("insertText", false, text);
+      return;
+    }
+
+    const selection = getSelectionOffsets(event.currentTarget);
+    const currentText = event.currentTarget.textContent || "";
+    const beforeText = currentText.slice(0, selection.start);
+    const afterText = currentText.slice(selection.end);
+    const pastedLines = text.split("\n");
+    const replacement = beforeText || afterText
+      ? [
+          toRaw(`${beforeText}${pastedLines[0]}`),
+          ...pastedLines.slice(1, -1),
+          `${pastedLines[pastedLines.length - 1]}${afterText}`,
+        ]
+      : pastedLines;
+    const next = [...lines];
+    next.splice(startLine, 1, ...replacement);
+    commit(next, startLine + replacement.length - 1, pastedLines[pastedLines.length - 1].length);
+  };
+
   const applyLinePrefix = (mutate: (value: string) => string) => {
     const index = lastFocusedRef.current ?? Math.max(0, lines.length - 1);
     const next = [...lines];
@@ -334,7 +375,7 @@ export function LiveMarkdownEditor({
             );
           }
           const line = lines[block.startLine] || "";
-          if (focusLine === block.startLine) return <RawLine key={`raw-${block.startLine}`} line={line} startLine={block.startLine} caretHint={caretHintRef.current} onKeyDown={handleKeyDown} onBlurCommit={handleBlurCommit} />;
+          if (focusLine === block.startLine) return <RawLine key={`raw-${block.startLine}`} line={line} startLine={block.startLine} caretHint={caretHintRef.current} onKeyDown={handleKeyDown} onBlurCommit={handleBlurCommit} onPasteText={handlePasteText} />;
           return <LinePreview key={block.startLine} line={line} startLine={block.startLine} onFocus={setFocusLine} />;
         })}
         <div onClick={() => commit([...lines, ""], lines.length, 0)} className="h-10 cursor-text" />
