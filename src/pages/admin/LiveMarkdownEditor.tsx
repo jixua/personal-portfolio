@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Code, Heading2, Image, List, ListOrdered, Minus, Quote, SquareCheck, Table } from "lucide-react";
+import { MarkdownRenderer } from "../../components/MarkdownRenderer";
 import { getClipboardImageFiles, getImageAltText } from "./fileHelpers";
 import { classifyLine, groupBlocks, type MarkdownBlock } from "./markdownEngine";
 import type { UploadMarkdownAsset } from "./types";
@@ -123,12 +124,14 @@ function RawBlock({
   type,
   focusNonce,
   onFocusBlock,
+  onBlurBlock,
   onChangeValue,
 }: {
   text: string;
   type: "code" | "table";
   focusNonce: number;
   onFocusBlock: () => void;
+  onBlurBlock: () => void;
   onChangeValue: (value: string) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -153,6 +156,7 @@ function RawBlock({
       ref={ref}
       value={text}
       onFocus={onFocusBlock}
+      onBlur={onBlurBlock}
       onChange={(event) => onChangeValue(event.target.value)}
       onInput={(event) => {
         event.currentTarget.style.height = "auto";
@@ -184,6 +188,33 @@ function rawLineClass(line: string) {
   return "min-w-0 min-h-[2rem] flex-1 whitespace-pre-wrap break-words text-base leading-8 text-gray-700 outline-none";
 }
 
+function PreviewShell({ markdown, line, onFocus }: { markdown: string; line: number; onFocus: (line: number) => void }) {
+  return (
+    <div
+      className="admin-live-preview cursor-text"
+      onClickCapture={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onFocus(line);
+      }}
+    >
+      <MarkdownRenderer content={markdown || "\u00a0"} className="admin-live-render" />
+    </div>
+  );
+}
+
+function LinePreview({ line, startLine, onFocus }: { line: string; startLine: number; onFocus: (line: number) => void }) {
+  const classified = classifyLine(line);
+  if (classified.type === "empty") {
+    return <div onClick={() => onFocus(startLine)} className="admin-live-empty-line cursor-text">&nbsp;</div>;
+  }
+  return <PreviewShell markdown={line} line={startLine} onFocus={onFocus} />;
+}
+
+function BlockPreview({ block, lines, onFocus }: { block: MarkdownBlock; lines: string[]; onFocus: (line: number) => void }) {
+  return <PreviewShell markdown={lines.slice(block.startLine, block.endLine + 1).join("\n")} line={block.startLine} onFocus={onFocus} />;
+}
+
 export function LiveMarkdownEditor({
   value,
   onChange,
@@ -205,14 +236,19 @@ export function LiveMarkdownEditor({
   const lastFocusedRef = useRef<number | null>(null);
   const onChangeRef = useRef(onChange);
   const skipNextChangeRef = useRef(false);
+  const lastDocKeyRef = useRef(docKey);
   onChangeRef.current = onChange;
 
   useEffect(() => {
     const nextLines = (value || "").split("\n");
-    caretHintRef.current = null;
-    lastFocusedRef.current = null;
-    setFocusLine(null);
-    setFocusNonce(0);
+    const docChanged = lastDocKeyRef.current !== docKey;
+    lastDocKeyRef.current = docKey;
+    if (docChanged) {
+      caretHintRef.current = null;
+      lastFocusedRef.current = null;
+      setFocusLine(null);
+      setFocusNonce(0);
+    }
     setLines((current) => {
       if (current.join("\n") === nextLines.join("\n")) return current;
       skipNextChangeRef.current = true;
@@ -277,6 +313,7 @@ export function LiveMarkdownEditor({
     const next = [...lines];
     next[startLine] = toRaw(event.currentTarget.textContent || "");
     setLines(next);
+    setFocusLine((current) => (current === startLine ? null : current));
   };
 
   const handleInputCommit = (event: React.FormEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
@@ -383,19 +420,23 @@ export function LiveMarkdownEditor({
       </div>
       <div className="px-0 py-2 pb-16">
         {blocks.map((block) => {
+          const focused = focusLine != null && focusLine >= block.startLine && focusLine <= block.endLine;
           if (block.type !== "line") {
+            if (!focused) return <BlockPreview key={`${block.type}-${block.startLine}`} block={block} lines={lines} onFocus={(line) => commit(lines, line, null)} />;
             return (
               <RawBlock
                 key={`${block.type}-${block.startLine}`}
                 type={block.type}
                 text={lines.slice(block.startLine, block.endLine + 1).join("\n")}
-                focusNonce={focusLine != null && focusLine >= block.startLine && focusLine <= block.endLine ? focusNonce : 0}
+                focusNonce={focusNonce}
                 onFocusBlock={() => setFocusLine(block.startLine)}
+                onBlurBlock={() => setFocusLine((current) => (current != null && current >= block.startLine && current <= block.endLine ? null : current))}
                 onChangeValue={(value) => replaceBlockLines(block, value)}
               />
             );
           }
           const line = lines[block.startLine] || "";
+          if (focusLine !== block.startLine) return <LinePreview key={`preview-${block.startLine}`} line={line} startLine={block.startLine} onFocus={(line) => commit(lines, line, null)} />;
           return (
             <RawLine
               key={`raw-${block.startLine}`}
