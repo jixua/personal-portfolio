@@ -4,6 +4,7 @@ import type { DocNode } from "../../data";
 
 type MenuState = { x: number; y: number; node: DocNode } | null;
 type SiblingInfo = { parentId: string | null; siblings: DocNode[] };
+type DropIntent = { targetId: string; mode: "before" | "after" | "inside" } | null;
 
 export function DocsTree({
   docs,
@@ -30,7 +31,7 @@ export function DocsTree({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [dropIntent, setDropIntent] = useState<DropIntent>(null);
 
   useEffect(() => setExpanded((current) => new Set([...current, ...folderIds])), [folderIds]);
   useEffect(() => {
@@ -68,6 +69,25 @@ export function DocsTree({
     onMove(movedId, target.parentId, oldSiblingIds, newSiblingIds);
   };
 
+  const moveInto = (movedId: string, folderId: string) => {
+    if (movedId === folderId) return;
+    const source = findSiblingInfo(docs, movedId);
+    const folder = findNode(docs, folderId);
+    if (!source || !folder?.isFolder || isDescendant(docs, movedId, folderId)) return;
+
+    const oldSiblingIds = source.siblings.map((node) => node.id).filter((id) => id !== movedId);
+    const newSiblingIds = (folder.children ?? []).map((node) => node.id).filter((id) => id !== movedId);
+    newSiblingIds.push(movedId);
+    if (source.parentId === folderId && source.siblings.findIndex((node) => node.id === movedId) === source.siblings.length - 1) return;
+    setExpanded((current) => new Set([...current, folderId]));
+    onMove(movedId, folderId, oldSiblingIds, newSiblingIds);
+  };
+
+  const moveNode = (movedId: string, targetId: string, mode: "before" | "after" | "inside") => {
+    if (mode === "inside") moveInto(movedId, targetId);
+    else moveAround(movedId, targetId, mode);
+  };
+
   return (
     <div className="relative">
       <div className="mb-3 flex items-center justify-between px-1">
@@ -96,19 +116,24 @@ export function DocsTree({
             startRename={startRename}
             submitRename={submitRename}
             draggingId={draggingId}
-            dropTargetId={dropTargetId}
+            dropIntent={dropIntent}
             setDraggingId={setDraggingId}
-            setDropTargetId={setDropTargetId}
-            moveAround={moveAround}
+            setDropIntent={setDropIntent}
+            moveNode={moveNode}
           />
         ))}
       </div>
       {menu && (
         <div className="fixed z-50 w-40 overflow-hidden rounded-[10px] border border-gray-100 bg-white py-1 shadow-xl shadow-gray-900/10" style={{ left: menu.x, top: menu.y }} onClick={(event) => event.stopPropagation()}>
           {menu.node.isFolder && (
-            <button type="button" onClick={() => { onNewChild(menu.node.id, false); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50">
-              <FilePlus className="h-3.5 w-3.5" /> 新建文档
-            </button>
+            <>
+              <button type="button" onClick={() => { onNewChild(menu.node.id, false); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50">
+                <FilePlus className="h-3.5 w-3.5" /> 新建文档
+              </button>
+              <button type="button" onClick={() => { onNewChild(menu.node.id, true); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50">
+                <FolderPlus className="h-3.5 w-3.5" /> 新建子文件夹
+              </button>
+            </>
           )}
           <button type="button" onClick={() => startRename(menu.node)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50">
             <Pencil className="h-3.5 w-3.5" /> 重命名
@@ -135,10 +160,10 @@ function TreeNode({
   setRenameValue,
   submitRename,
   draggingId,
-  dropTargetId,
+  dropIntent,
   setDraggingId,
-  setDropTargetId,
-  moveAround,
+  setDropIntent,
+  moveNode,
 }: {
   node: DocNode;
   depth: number;
@@ -153,15 +178,16 @@ function TreeNode({
   startRename: (node: DocNode) => void;
   submitRename: (node: DocNode) => void;
   draggingId: string | null;
-  dropTargetId: string | null;
+  dropIntent: DropIntent;
   setDraggingId: React.Dispatch<React.SetStateAction<string | null>>;
-  setDropTargetId: React.Dispatch<React.SetStateAction<string | null>>;
-  moveAround: (movedId: string, targetId: string, placement: "before" | "after") => void;
+  setDropIntent: React.Dispatch<React.SetStateAction<DropIntent>>;
+  moveNode: (movedId: string, targetId: string, mode: "before" | "after" | "inside") => void;
 }) {
   const isOpen = expanded.has(node.id);
   const active = activeId === node.id;
   const dragging = draggingId === node.id;
-  const dropping = dropTargetId === node.id && draggingId !== null && draggingId !== node.id;
+  const dropping = dropIntent?.targetId === node.id && draggingId !== null && draggingId !== node.id;
+  const droppingInside = dropping && dropIntent?.mode === "inside";
   const toggle = () => setExpanded((current) => {
     const next = new Set(current);
     if (next.has(node.id)) next.delete(node.id);
@@ -178,32 +204,31 @@ function TreeNode({
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData("text/plain", node.id);
           setDraggingId(node.id);
-          setDropTargetId(null);
+          setDropIntent(null);
         }}
         onDragOver={(event) => {
           if (draggingId && draggingId !== node.id) {
             event.preventDefault();
-            setDropTargetId(node.id);
+            setDropIntent({ targetId: node.id, mode: getDropMode(event, node) });
           }
         }}
-        onDragLeave={() => setDropTargetId((current) => current === node.id ? null : current)}
+        onDragLeave={() => setDropIntent((current) => current?.targetId === node.id ? null : current)}
         onDrop={(event) => {
           event.preventDefault();
           const movedId = draggingId || event.dataTransfer.getData("text/plain");
-          const rect = event.currentTarget.getBoundingClientRect();
-          if (movedId) moveAround(movedId, node.id, event.clientY > rect.top + rect.height / 2 ? "after" : "before");
+          if (movedId) moveNode(movedId, node.id, getDropMode(event, node));
           setDraggingId(null);
-          setDropTargetId(null);
+          setDropIntent(null);
         }}
         onDragEnd={() => {
           setDraggingId(null);
-          setDropTargetId(null);
+          setDropIntent(null);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
           onContextMenu({ x: event.clientX, y: event.clientY, node });
         }}
-        className={`group flex cursor-pointer items-center gap-1.5 rounded-[9px] px-2 py-1.5 text-[13px] transition-colors ${active ? "bg-[color-mix(in_oklab,var(--seal)_10%,white)] font-bold text-[var(--seal)]" : "text-gray-600 hover:bg-gray-50"} ${dragging ? "opacity-45" : ""} ${dropping ? "ring-1 ring-[var(--seal)]" : ""}`}
+        className={`group flex cursor-pointer items-center gap-1.5 rounded-[9px] px-2 py-1.5 text-[13px] transition-colors ${active ? "bg-[color-mix(in_oklab,var(--seal)_10%,white)] font-bold text-[var(--seal)]" : "text-gray-600 hover:bg-gray-50"} ${dragging ? "opacity-45" : ""} ${dropping ? "ring-1 ring-[var(--seal)]" : ""} ${droppingInside ? "bg-[color-mix(in_oklab,var(--seal)_8%,white)]" : ""}`}
         style={{ paddingLeft: 8 + depth * 14 }}
       >
         <GripVertical className="h-3 w-3 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100" />
@@ -251,10 +276,10 @@ function TreeNode({
           startRename={() => {}}
           submitRename={submitRename}
           draggingId={draggingId}
-          dropTargetId={dropTargetId}
+          dropIntent={dropIntent}
           setDraggingId={setDraggingId}
-          setDropTargetId={setDropTargetId}
-          moveAround={moveAround}
+          setDropIntent={setDropIntent}
+          moveNode={moveNode}
         />
       ))}
     </div>
@@ -289,4 +314,11 @@ function findNode(nodes: DocNode[], id: string): DocNode | null {
 function isDescendant(nodes: DocNode[], ancestorId: string, possibleChildId: string): boolean {
   const ancestor = findNode(nodes, ancestorId);
   return ancestor ? Boolean(findNode(ancestor.children ?? [], possibleChildId)) : false;
+}
+
+function getDropMode(event: React.DragEvent<HTMLElement>, node: DocNode): "before" | "after" | "inside" {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const y = event.clientY - rect.top;
+  if (node.isFolder && y > rect.height * 0.25 && y < rect.height * 0.75) return "inside";
+  return y > rect.height / 2 ? "after" : "before";
 }
