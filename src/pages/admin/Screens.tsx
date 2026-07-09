@@ -247,6 +247,16 @@ export function BlogEditorScreen({
   const [propsOpen, setPropsOpen] = useState(true);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractMarkdownHeadings(form.content, [1, 2, 3, 4]), [form.content]);
+  const categoryOptions = useMemo(() => {
+    const categories = new Set<string>();
+    for (const post of posts) {
+      const value = post.category?.trim();
+      if (value) categories.add(value);
+    }
+    if (form.category.trim()) categories.add(form.category.trim());
+    return Array.from(categories).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }, [form.category, posts]);
+  const computedReadTime = useMemo(() => estimateReadTime(form.content), [form.content]);
   useEffect(() => {
     setActiveId((current) => {
       if (current === null) return current;
@@ -262,7 +272,7 @@ export function BlogEditorScreen({
   useEffect(() => { if (active) setForm(postToForm(active)); }, [active?.id]);
   const scrollToHeading = (heading: MarkdownHeading) => scrollEditorToHeading(contentScrollRef.current, heading.id);
   const createPost = async () => {
-    const draft = newPostForm();
+    const draft = withComputedReadTime(newPostForm());
     const created = await saveJson<{ id: number }>("/api/posts", "POST", token, draft);
     const nextPost: ApiPost = {
       id: created.id,
@@ -294,7 +304,7 @@ export function BlogEditorScreen({
     if (!form.title.trim()) return;
     setSaving(true);
     try {
-      await saveJson(active ? `/api/posts/${active.id}` : "/api/posts", active ? "PUT" : "POST", token, form);
+      await saveJson(active ? `/api/posts/${active.id}` : "/api/posts", active ? "PUT" : "POST", token, withComputedReadTime(form));
       await onRefresh();
     } finally {
       setSaving(false);
@@ -350,7 +360,19 @@ export function BlogEditorScreen({
             <button type="button" onClick={() => setPropsOpen(!propsOpen)} className="flex w-full items-center gap-1.5 px-3 py-2.5 font-mono text-[10.5px] font-bold uppercase tracking-wider text-gray-400">
               {propsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />} 属性
             </button>
-            {propsOpen && <div className="px-3.5 pb-3"><PropRow icon={<Tag />} label="分类" value={form.category} onChange={(value) => setForm({ ...form, category: value })} /><PropRow icon={<Calendar />} label="日期" value={form.date} onChange={(value) => setForm({ ...form, date: value })} /><PropRow icon={<Clock />} label="阅读时长" value={form.readTime} onChange={(value) => setForm({ ...form, readTime: value })} /><PropRow icon={<AlignLeft />} label="摘要" value={form.snippet} onChange={(value) => setForm({ ...form, snippet: value })} /></div>}
+            {propsOpen && (
+              <div className="px-3.5 pb-3">
+                <CategoryPropRow
+                  icon={<Tag />}
+                  value={form.category}
+                  options={categoryOptions}
+                  onChange={(value) => setForm({ ...form, category: value })}
+                />
+                <PropRow icon={<Calendar />} label="日期" value={form.date} onChange={(value) => setForm({ ...form, date: value })} />
+                <ReadTimeRow icon={<Clock />} value={computedReadTime} />
+                <PropRow icon={<AlignLeft />} label="摘要" value={form.snippet} onChange={(value) => setForm({ ...form, snippet: value })} />
+              </div>
+            )}
           </div>
           <LiveMarkdownEditor value={form.content} onChange={(content) => setForm((current) => ({ ...current, content }))} docKey={`blog-${active?.id ?? "new"}`} uploadMarkdownAsset={uploadMarkdownAsset} accent="blog" />
           </div>
@@ -659,6 +681,86 @@ function HeadingTree({ headings, onSelect }: { headings: MarkdownHeading[]; onSe
 function PropRow({ icon, label, value, onChange }: { icon: React.ReactElement<{ className?: string }>; label: string; value: string; onChange: (value: string) => void }) {
   return <div className="flex items-center gap-2.5 px-0.5 py-1.5"><div className="flex w-[92px] shrink-0 items-center gap-1.5 text-[12.5px] text-gray-400">{icon && { ...icon, props: { ...icon.props, className: "h-[13px] w-[13px]" } }}{label}</div><input value={value} onChange={(event) => onChange(event.target.value)} className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-[13.5px] text-gray-700 outline-none focus:bg-white" /></div>;
 }
+function CategoryPropRow({
+  icon,
+  value,
+  options,
+  onChange,
+}: {
+  icon: React.ReactElement<{ className?: string }>;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const normalizedValue = value.trim();
+  const filteredOptions = options.filter((option) => option.toLowerCase().includes(normalizedValue.toLowerCase()));
+  const exactMatch = options.some((option) => option === normalizedValue);
+  return (
+    <div className="relative flex items-center gap-2.5 px-0.5 py-1.5">
+      <div className="flex w-[92px] shrink-0 items-center gap-1.5 text-[12.5px] text-gray-400">
+        {icon && { ...icon, props: { ...icon.props, className: "h-[13px] w-[13px]" } }}分类
+      </div>
+      <input
+        value={value}
+        onFocus={() => setOpen(true)}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setOpen(true);
+        }}
+        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        placeholder="选择或输入新分类"
+        className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-[13.5px] text-gray-700 outline-none focus:bg-white"
+      />
+      {open && (
+        <div className="absolute left-[103px] right-0 top-[34px] z-30 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_14px_36px_rgba(15,23,42,0.12)]">
+          <div className="border-b border-gray-100 px-3 py-2 font-mono text-[10.5px] font-bold uppercase tracking-wider text-gray-400">已有分类</div>
+          <div className="max-h-48 overflow-y-auto py-1">
+            {filteredOptions.length > 0 ? filteredOptions.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(option);
+                  setOpen(false);
+                }}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[13px] text-gray-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700"
+              >
+                <span className="min-w-0 truncate">{option}</span>
+                <span className="font-mono text-[10px] font-bold text-gray-300">选择</span>
+              </button>
+            )) : (
+              <div className="px-3 py-3 text-xs text-gray-400">暂无匹配分类</div>
+            )}
+          </div>
+          {normalizedValue && !exactMatch && (
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2.5 text-left text-[13px] font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              新建分类：{normalizedValue}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+function ReadTimeRow({ icon, value }: { icon: React.ReactElement<{ className?: string }>; value: string }) {
+  return (
+    <div className="flex items-center gap-2.5 px-0.5 py-1.5">
+      <div className="flex w-[92px] shrink-0 items-center gap-1.5 text-[12.5px] text-gray-400">
+        {icon && { ...icon, props: { ...icon.props, className: "h-[13px] w-[13px]" } }}阅读时长
+      </div>
+      <div className="min-w-0 flex-1 rounded-md px-1 py-0.5 text-[13.5px] text-gray-700">{value}</div>
+      <div className="shrink-0 font-mono text-[10.5px] font-bold text-gray-300">自动</div>
+    </div>
+  );
+}
 function projectToForm(project: ApiProject | null) {
   return { num: project?.num ?? "", title: project?.title ?? "", subtitle: project?.subtitle ?? "", category: project?.category ?? "", period: project?.period ?? "", description: project?.description ?? "", imageUrl: project?.imageUrl ?? "", tags: project?.tags ? safeParseArray(project.tags).join(", ") : "", stack: project?.stack ? safeParseArray(project.stack).join(", ") : "", role: project?.role ?? "", link: project?.link ?? "", github: project?.github ?? "", overview: project?.overview ?? "", longDescription: project?.longDescription ?? "", features: project?.features ? safeParseArray(project.features).map((item: any) => typeof item === "string" ? item : item.title).filter(Boolean).join("\n") : "", detail: project?.detail ?? "" };
 }
@@ -666,10 +768,27 @@ function experienceToForm(item: ApiExperience | null) {
   return { company: item?.company ?? "", role: item?.role ?? "", date: item?.date ?? "", description: item?.description ?? "", achievements: item?.achievements ? safeParseArray(item.achievements).join("\n") : "", techStack: item?.techStack ? safeParseArray(item.techStack).join(", ") : "" };
 }
 function postToForm(post: ApiPost | null) {
-  return { title: post?.title ?? "", category: post?.category ?? "", snippet: post?.snippet ?? "", date: post?.date ?? new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" }), readTime: post?.readTime ?? "5 分钟阅读", content: post?.content ?? "" };
+  const content = post?.content ?? "";
+  return { title: post?.title ?? "", category: post?.category ?? "", snippet: post?.snippet ?? "", date: post?.date ?? new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" }), readTime: estimateReadTime(content), content };
 }
 function newPostForm() {
   return { ...postToForm(null), title: "新建文章" };
+}
+function estimateReadTime(markdown: string) {
+  const plainText = markdown
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/~~~[\s\S]*?~~~/g, " ")
+    .replace(/!\[[^\]]*]\([^)]+\)/g, " ")
+    .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[`*_~>#|[\]()-]/g, " ");
+  const cjkCount = (plainText.match(/[\u3400-\u9fff]/g) ?? []).length;
+  const wordCount = (plainText.replace(/[\u3400-\u9fff]/g, " ").match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*/g) ?? []).length;
+  const estimatedMinutes = Math.max(1, Math.ceil((cjkCount + wordCount * 1.6) / 450));
+  return `${estimatedMinutes} 分钟阅读`;
+}
+function withComputedReadTime<T extends { content: string; readTime: string }>(form: T): T {
+  return { ...form, readTime: estimateReadTime(form.content) };
 }
 function authHeader(token: string) {
   return { Authorization: `Bearer ${token}` };
