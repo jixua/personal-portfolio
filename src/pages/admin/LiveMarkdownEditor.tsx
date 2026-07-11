@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Code, Heading2, Image, List, ListOrdered, Minus, Quote, SquareCheck, Table } from "lucide-react";
 import { MarkdownRenderer } from "../../components/MarkdownRenderer";
 import { getClipboardImageFiles, getImageAltText } from "./fileHelpers";
@@ -154,12 +155,12 @@ function InlineTokenView({ token, active }: { token: InlineToken; active: boolea
     );
   }
   const inner = token.type === "strong"
-    ? <strong>{token.text}</strong>
+    ? <strong className="font-extrabold text-gray-900">{token.text}</strong>
     : token.type === "em"
       ? <em>{token.text}</em>
       : token.type === "delete"
         ? <del>{token.text}</del>
-        : <code className="le-inline-code">{token.text}</code>;
+        : <code className="le-inline-code rounded-md border border-indigo-100 bg-indigo-50 px-1.5 py-[0.12rem] font-mono text-[0.86em] font-semibold text-indigo-700">{token.text}</code>;
   return (
     <span className={className}>
       <span className="le-md-marker">{token.markerOpen}</span>{inner}<span className="le-md-marker">{token.markerClose}</span>
@@ -184,11 +185,12 @@ function RawLine({
   focusNonce: number;
   onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
   onFocusLine: (line: number) => void;
-  onInputCommit: (event: React.FormEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
+  onInputCommit: (target: HTMLDivElement, line: number, toRaw: (value: string) => string) => void;
   onBlurCommit: (event: React.FocusEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
   onPasteText: (event: React.ClipboardEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const isComposingRef = useRef(false);
   const [activeTokenId, setActiveTokenId] = useState<string | null>(null);
   const parts = editableLineParts(line);
   const inlineTokens = useMemo(() => parseInlineTokens(parts.text), [parts.text]);
@@ -218,11 +220,31 @@ function RawLine({
         }}
         onMouseUp={updateActiveToken}
         onKeyUp={updateActiveToken}
+        onCompositionStart={() => {
+          isComposingRef.current = true;
+        }}
+        onCompositionEnd={(event) => {
+          isComposingRef.current = false;
+          const target = event.currentTarget;
+          const offset = getCaretOffset(target);
+          flushSync(() => {
+            onInputCommit(target, startLine, parts.toRaw);
+          });
+          if (ref.current) placeCaret(ref.current, offset);
+          updateActiveToken();
+        }}
         onInput={(event) => {
-          onInputCommit(event, startLine, parts.toRaw);
-          window.requestAnimationFrame(updateActiveToken);
+          if (isComposingRef.current) return;
+          const target = event.currentTarget;
+          const offset = getCaretOffset(target);
+          flushSync(() => {
+            onInputCommit(target, startLine, parts.toRaw);
+          });
+          if (ref.current) placeCaret(ref.current, offset);
+          updateActiveToken();
         }}
         onKeyDown={(event) => {
+          if (isComposingRef.current || event.nativeEvent.isComposing) return;
           onKeyDown(event, startLine, parts.toRaw);
           window.requestAnimationFrame(updateActiveToken);
         }}
@@ -230,7 +252,7 @@ function RawLine({
         onPaste={(event) => onPasteText(event, startLine, parts.toRaw)}
         className={rawLineClass(line)}
       >
-        {inlineTokens.map((token, index) => <InlineTokenView key={`${token.start}-${token.end}-${index}`} token={token} active={token.type !== "text" && token.id === activeTokenId} />)}
+        {inlineTokens.map((token, index) => <InlineTokenView key={index} token={token} active={token.type !== "text" && token.id === activeTokenId} />)}
       </div>
     </div>
   );
@@ -285,24 +307,33 @@ function RawBlock({
   );
 }
 
+const headingClasses: Record<number, { size: string; spacing: string; color: string }> = {
+  1: { size: "text-3xl md:text-4xl", spacing: "mt-0 mb-8", color: "text-gray-900" },
+  2: { size: "text-2xl md:text-3xl", spacing: "mt-12 mb-5 border-b border-gray-100 pb-3", color: "text-gray-900" },
+  3: { size: "text-xl md:text-2xl", spacing: "mt-10 mb-4", color: "text-gray-900" },
+  4: { size: "text-lg md:text-xl", spacing: "mt-8 mb-3", color: "text-gray-900" },
+  5: { size: "text-base md:text-lg", spacing: "mt-6 mb-2", color: "text-gray-900" },
+  6: { size: "text-sm md:text-base", spacing: "mt-6 mb-2", color: "uppercase text-gray-500" },
+};
+
 function rawLineFrameClass(line: string) {
   const type = classifyLine(line);
   const base = "group flex items-baseline gap-2 rounded-md border border-transparent transition-colors";
-  if (type.type === "heading") return `${base} my-3`;
-  if (type.type === "quote") return `${base} my-3 border-l-2 border-l-indigo-200 pl-4`;
-  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return `${base} my-1.5`;
-  return `${base} my-1.5`;
+  if (type.type === "heading") return `${base} ${headingClasses[type.level]?.spacing ?? "my-3"}`;
+  if (type.type === "quote") return `${base} my-6 border-l-4 border-l-indigo-300 bg-indigo-50/60 py-3 pl-5 pr-4`;
+  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return `${base} my-2`;
+  return `${base} my-5`;
 }
 
 function rawLineClass(line: string) {
   const type = classifyLine(line);
   if (type.type === "heading") {
-    const size = type.level === 1 ? "text-[30px]" : type.level === 2 ? "text-2xl" : type.level === 3 ? "text-xl" : "text-base";
-    return `min-w-0 min-h-[2.2rem] flex-1 whitespace-pre-wrap break-words font-display font-extrabold text-gray-900 outline-none ${size}`;
+    const heading = headingClasses[type.level] ?? headingClasses[6];
+    return `min-w-0 min-h-[1.2em] flex-1 whitespace-pre-wrap break-words font-display font-black tracking-tight outline-none ${heading.color} ${heading.size}`;
   }
-  if (type.type === "quote") return "min-w-0 min-h-[1.75rem] flex-1 py-1 text-[15px] leading-7 text-gray-600 outline-none";
-  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return "min-w-0 min-h-[2rem] flex-1 whitespace-pre-wrap break-words text-base leading-8 text-gray-700 outline-none";
-  return "min-w-0 min-h-[2rem] flex-1 whitespace-pre-wrap break-words text-base leading-8 text-gray-700 outline-none";
+  if (type.type === "quote") return "min-w-0 min-h-[1.75rem] flex-1 text-lg leading-8 text-gray-700 outline-none";
+  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return "min-w-0 min-h-[2rem] flex-1 whitespace-pre-wrap break-words text-lg leading-8 text-gray-700 outline-none";
+  return "min-w-0 min-h-[2rem] flex-1 whitespace-pre-wrap break-words text-lg leading-8 text-gray-700 outline-none";
 }
 
 function PreviewShell({ markdown, line, onFocus }: { markdown: string; line: number; onFocus: (line: number) => void }) {
@@ -318,14 +349,6 @@ function PreviewShell({ markdown, line, onFocus }: { markdown: string; line: num
       <MarkdownRenderer content={markdown || "\u00a0"} className="admin-live-render" />
     </div>
   );
-}
-
-function LinePreview({ line, startLine, onFocus }: { line: string; startLine: number; onFocus: (line: number) => void }) {
-  const classified = classifyLine(line);
-  if (classified.type === "empty") {
-    return <div onClick={() => onFocus(startLine)} className="admin-live-empty-line cursor-text">&nbsp;</div>;
-  }
-  return <PreviewShell markdown={line} line={startLine} onFocus={onFocus} />;
 }
 
 function BlockPreview({ block, lines, onFocus }: { block: MarkdownBlock; lines: string[]; onFocus: (line: number) => void }) {
@@ -387,9 +410,13 @@ export function LiveMarkdownEditor({
 
   const blocks = useMemo(() => groupBlocks(lines), [lines]);
 
-  const commit = (nextLines: string[], nextFocus?: number | null, caret?: number | null) => {
+  const commit = (
+    updater: string[] | ((current: string[]) => string[]),
+    nextFocus?: number | null,
+    caret?: number | null,
+  ) => {
     caretHintRef.current = caret ?? null;
-    setLines(nextLines);
+    setLines((current) => (typeof updater === "function" ? updater(current) : updater));
     if (nextFocus !== undefined) {
       setFocusLine(nextFocus);
       setFocusNonce((nonce) => nonce + 1);
@@ -401,40 +428,61 @@ export function LiveMarkdownEditor({
       event.preventDefault();
       const offset = getCaretOffset(event.currentTarget);
       const text = event.currentTarget.textContent || "";
-      const next = [...lines];
-      next[startLine] = toRaw(text.slice(0, offset));
-      next.splice(startLine + 1, 0, text.slice(offset));
-      commit(next, startLine + 1, 0);
+      commit(
+        (current) => {
+          const next = [...current];
+          next[startLine] = toRaw(text.slice(0, offset));
+          next.splice(startLine + 1, 0, text.slice(offset));
+          return next;
+        },
+        startLine + 1,
+        0,
+      );
     } else if (event.key === "Backspace") {
       const offset = getCaretOffset(event.currentTarget);
       if (offset === 0 && startLine > 0) {
         event.preventDefault();
-        const next = [...lines];
-        const prevLen = next[startLine - 1].length;
-        next[startLine - 1] += toRaw(event.currentTarget.textContent || "");
-        next.splice(startLine, 1);
-        commit(next, startLine - 1, prevLen);
+        const text = event.currentTarget.textContent || "";
+        setLines((current) => {
+          const next = [...current];
+          caretHintRef.current = next[startLine - 1].length;
+          next[startLine - 1] += toRaw(text);
+          next.splice(startLine, 1);
+          return next;
+        });
+        setFocusLine(startLine - 1);
+        setFocusNonce((nonce) => nonce + 1);
       }
     } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       event.preventDefault();
-      const next = [...lines];
-      next[startLine] = toRaw(event.currentTarget.textContent || "");
+      const text = event.currentTarget.textContent || "";
       const target = startLine + (event.key === "ArrowUp" ? -1 : 1);
-      commit(next, target >= 0 && target < next.length ? target : startLine, null);
+      commit(
+        (current) => {
+          const next = [...current];
+          next[startLine] = toRaw(text);
+          return next;
+        },
+        target >= 0 && target < lines.length ? target : startLine,
+        null,
+      );
     } else if (event.key === "Escape") {
       event.currentTarget.blur();
     }
   };
 
   const handleBlurCommit = (event: React.FocusEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
-    const next = [...lines];
-    next[startLine] = toRaw(event.currentTarget.textContent || "");
-    setLines(next);
+    const text = event.currentTarget.textContent || "";
+    setLines((current) => {
+      const next = [...current];
+      next[startLine] = toRaw(text);
+      return next;
+    });
     setFocusLine((current) => (current === startLine ? null : current));
   };
 
-  const handleInputCommit = (event: React.FormEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
-    const raw = toRaw(event.currentTarget.textContent || "");
+  const handleInputCommit = (target: HTMLDivElement, startLine: number, toRaw: (value: string) => string) => {
+    const raw = toRaw(target.textContent || "");
     setLines((current) => {
       if (current[startLine] === raw) return current;
       const next = [...current];
@@ -465,23 +513,42 @@ export function LiveMarkdownEditor({
           `${pastedLines[pastedLines.length - 1]}${afterText}`,
         ]
       : pastedLines;
-    const next = [...lines];
-    next.splice(startLine, 1, ...replacement);
-    commit(next, startLine + replacement.length - 1, pastedLines[pastedLines.length - 1].length);
+    commit(
+      (current) => {
+        const next = [...current];
+        next.splice(startLine, 1, ...replacement);
+        return next;
+      },
+      startLine + replacement.length - 1,
+      pastedLines[pastedLines.length - 1].length,
+    );
   };
 
   const applyLinePrefix = (mutate: (value: string) => string) => {
     const index = lastFocusedRef.current ?? Math.max(0, lines.length - 1);
-    const next = [...lines];
-    next[index] = mutate(next[index] || "");
-    commit(next, index, next[index].length);
+    const nextValue = mutate(lines[index] || "");
+    commit(
+      (current) => {
+        const next = [...current];
+        next[index] = nextValue;
+        return next;
+      },
+      index,
+      nextValue.length,
+    );
   };
 
   const insertBlock = (templateLines: string[]) => {
     const index = lastFocusedRef.current != null ? lastFocusedRef.current + 1 : lines.length;
-    const next = [...lines];
-    next.splice(index, 0, "", ...templateLines, "");
-    commit(next, index + 1, templateLines[0]?.length ?? 0);
+    commit(
+      (current) => {
+        const next = [...current];
+        next.splice(index, 0, "", ...templateLines, "");
+        return next;
+      },
+      index + 1,
+      templateLines[0]?.length ?? 0,
+    );
   };
 
   const replaceFirstMarkdown = (search: string, replacement: string) => {
@@ -502,9 +569,15 @@ export function LiveMarkdownEditor({
     event.preventDefault();
     const placeholders = images.map((_, index) => `![图片上传中 ${index + 1}](uploading://clipboard-image-${Date.now()}-${index})`);
     const index = focusLine ?? lines.length - 1;
-    const next = [...lines];
-    next.splice(index + 1, 0, ...placeholders);
-    commit(next, index + 1, null);
+    commit(
+      (current) => {
+        const next = [...current];
+        next.splice(index + 1, 0, ...placeholders);
+        return next;
+      },
+      index + 1,
+      null,
+    );
     setPasteUploadCount((count) => count + images.length);
 
     await Promise.all(images.map(async (file, index) => {
@@ -539,7 +612,7 @@ export function LiveMarkdownEditor({
         {blocks.map((block) => {
           const focused = focusLine != null && focusLine >= block.startLine && focusLine <= block.endLine;
           if (block.type !== "line") {
-            if (!focused) return <BlockPreview key={`${block.type}-${block.startLine}`} block={block} lines={lines} onFocus={(line) => commit(lines, line, null)} />;
+            if (!focused) return <BlockPreview key={`${block.type}-${block.startLine}`} block={block} lines={lines} onFocus={(line) => commit((current) => current, line, null)} />;
             return (
               <RawBlock
                 key={`${block.type}-${block.startLine}`}
@@ -553,7 +626,6 @@ export function LiveMarkdownEditor({
             );
           }
           const line = lines[block.startLine] || "";
-          if (focusLine !== block.startLine) return <LinePreview key={`preview-${block.startLine}`} line={line} startLine={block.startLine} onFocus={(line) => commit(lines, line, null)} />;
           return (
             <RawLine
               key={`raw-${block.startLine}`}
@@ -569,7 +641,10 @@ export function LiveMarkdownEditor({
             />
           );
         })}
-        <div onClick={() => commit([...lines, ""], lines.length, 0)} className="h-10 cursor-text" />
+        <div
+          onClick={() => commit((current) => [...current, ""], lines.length, 0)}
+          className="h-10 cursor-text"
+        />
       </div>
     </div>
   );
