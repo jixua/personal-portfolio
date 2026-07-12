@@ -428,10 +428,6 @@ body {
     padding: 0;
   }
 
-  .admin-live-empty-line {
-    min-height: 2rem;
-  }
-
   .admin-live-preview .admin-live-render > *:first-child {
     margin-top: 0;
   }
