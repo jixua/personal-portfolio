@@ -40,6 +40,19 @@ function getSelectionOffsets(el: HTMLElement) {
   }
 }
 
+function isElementFullySelected(el: HTMLElement) {
+  const { start, end } = getSelectionOffsets(el);
+  return start === 0 && end === (el.textContent || "").length;
+}
+
+function selectElementContents(el: HTMLElement) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
 function placeCaret(el: HTMLElement, offset?: number | null) {
   const len = (el.textContent || "").length;
   const nextOffset = offset == null ? len : Math.max(0, Math.min(offset, len));
@@ -243,6 +256,7 @@ function RawBlock({
   onFocusBlock,
   onBlurBlock,
   onChangeValue,
+  onSelectAll,
 }: {
   text: string;
   type: "code" | "table";
@@ -250,6 +264,7 @@ function RawBlock({
   onFocusBlock: () => void;
   onBlurBlock: () => void;
   onChangeValue: (value: string) => void;
+  onSelectAll: () => void;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const resize = () => {
@@ -275,6 +290,17 @@ function RawBlock({
       onFocus={onFocusBlock}
       onBlur={onBlurBlock}
       onChange={(event) => onChangeValue(event.target.value)}
+      onKeyDown={(event) => {
+        if (
+          (event.ctrlKey || event.metaKey)
+          && event.key.toLowerCase() === "a"
+          && event.currentTarget.selectionStart === 0
+          && event.currentTarget.selectionEnd === event.currentTarget.value.length
+        ) {
+          event.preventDefault();
+          onSelectAll();
+        }
+      }}
       onInput={(event) => {
         event.currentTarget.style.height = "auto";
         event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
@@ -354,6 +380,7 @@ export function LiveMarkdownEditor({
   const onChangeRef = useRef(onChange);
   const skipNextChangeRef = useRef(false);
   const lastDocKeyRef = useRef(docKey);
+  const articleRef = useRef<HTMLDivElement | null>(null);
   onChangeRef.current = onChange;
 
   useEffect(() => {
@@ -397,7 +424,10 @@ export function LiveMarkdownEditor({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
-    if (event.key === "Enter") {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && isElementFullySelected(event.currentTarget)) {
+      event.preventDefault();
+      if (articleRef.current) selectElementContents(articleRef.current);
+    } else if (event.key === "Enter") {
       event.preventDefault();
       const offset = getCaretOffset(event.currentTarget);
       const text = event.currentTarget.textContent || "";
@@ -535,7 +565,7 @@ export function LiveMarkdownEditor({
         <ToolbarButton title="分割线" icon={<Minus />} onClick={() => insertBlock(["---"])} />
         {pasteUploadCount > 0 && <span className="ml-auto pr-2 font-mono text-[11px] font-bold text-amber-600">正在上传 {pasteUploadCount} 张图片</span>}
       </div>
-      <div className="px-0 py-2 pb-16">
+      <div ref={articleRef} className="px-0 py-2 pb-16">
         {blocks.map((block) => {
           const focused = focusLine != null && focusLine >= block.startLine && focusLine <= block.endLine;
           if (block.type !== "line") {
@@ -549,6 +579,9 @@ export function LiveMarkdownEditor({
                 onFocusBlock={() => setFocusLine(block.startLine)}
                 onBlurBlock={() => setFocusLine((current) => (current != null && current >= block.startLine && current <= block.endLine ? null : current))}
                 onChangeValue={(value) => replaceBlockLines(block, value)}
+                onSelectAll={() => {
+                  if (articleRef.current) selectElementContents(articleRef.current);
+                }}
               />
             );
           }
