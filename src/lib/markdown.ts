@@ -12,6 +12,15 @@ export interface MarkdownHeading {
   line: number;
 }
 
+export interface MarkdownHeadingLayout extends MarkdownHeading {
+  depth: number;
+  hasSkippedLevel: boolean;
+}
+
+export interface MarkdownHeadingTreeNode extends MarkdownHeadingLayout {
+  children: MarkdownHeadingTreeNode[];
+}
+
 const CJK_CHAR_CLASS = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}";
 
 function normalizeInlineMarkdown(text: string): string {
@@ -148,4 +157,55 @@ export function extractMarkdownHeadings(markdown: string, levels: number[] = [1,
   });
 
   return headings;
+}
+
+export function layoutMarkdownHeadings(headings: MarkdownHeading[], maxDepth = 3): MarkdownHeadingLayout[] {
+  const laidOut: MarkdownHeadingLayout[] = [];
+  const visit = (nodes: MarkdownHeadingTreeNode[]) => {
+    nodes.forEach(({ children, ...heading }) => {
+      laidOut.push(heading);
+      visit(children);
+    });
+  };
+
+  visit(buildMarkdownHeadingTree(headings, maxDepth));
+  return laidOut;
+}
+
+export function buildMarkdownHeadingTree(headings: MarkdownHeading[], maxDepth = 3): MarkdownHeadingTreeNode[] {
+  const roots: MarkdownHeadingTreeNode[] = [];
+  const ancestors: MarkdownHeadingTreeNode[] = [];
+
+  headings.forEach((heading) => {
+    while (ancestors.length > 0 && ancestors[ancestors.length - 1].level >= heading.level) {
+      ancestors.pop();
+    }
+
+    const parent = ancestors[ancestors.length - 1];
+    const parentLevel = parent?.level;
+    const hasSkippedLevel = parentLevel === undefined ? heading.level > 2 : heading.level > parentLevel + 1;
+    const node: MarkdownHeadingTreeNode = {
+      ...heading,
+      depth: Math.min(ancestors.length, maxDepth),
+      hasSkippedLevel,
+      children: [],
+    };
+
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+    ancestors.push(node);
+  });
+
+  return roots;
+}
+
+export function getMarkdownHeadingKey(heading: MarkdownHeading): string {
+  return `${heading.id}-${heading.line}`;
+}
+
+export function flattenVisibleMarkdownHeadingTree(nodes: MarkdownHeadingTreeNode[], collapsed: ReadonlySet<string>): MarkdownHeadingTreeNode[] {
+  return nodes.flatMap((node) => [
+    node,
+    ...(collapsed.has(getMarkdownHeadingKey(node)) ? [] : flattenVisibleMarkdownHeadingTree(node.children, collapsed)),
+  ]);
 }

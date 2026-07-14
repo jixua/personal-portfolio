@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, FileText, Folder } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, FileText, Folder, ListTree } from "lucide-react";
 import { DocNode } from "../data";
 import { useData } from "../context/DataContext";
 import { MarkdownRenderer } from "../components/MarkdownRenderer";
-import { extractMarkdownHeadings } from "../lib/markdown";
+import { buildMarkdownHeadingTree, extractMarkdownHeadings, flattenVisibleMarkdownHeadingTree, getMarkdownHeadingKey } from "../lib/markdown";
 
 type ContentTab = "blog" | "docs";
 
@@ -116,7 +116,7 @@ export function BlogPage({
         ? activePost.content || `${activePost.snippet}\n\n*完整内容敬请期待...*`
         : "";
 
-  const outlineHeadings = useMemo(() => extractMarkdownHeadings(activeContent, [2, 3, 4]), [activeContent]);
+  const outlineHeadings = useMemo(() => extractMarkdownHeadings(activeContent), [activeContent]);
   const flatItems: NavItem[] = useMemo(
     () => (activeTab === "docs" ? flattenDocs(knowledgeDocs).map((doc) => ({ id: doc.id, title: doc.title })) : blogPosts.map((post) => ({ id: post.id, title: post.title }))),
     [activeTab, blogPosts, knowledgeDocs],
@@ -268,7 +268,7 @@ export function BlogPage({
             </div>
           )}
         </div>
-        <PublicHeadingToc headings={outlineHeadings} accent={accent} />
+        <PublicHeadingToc key={`${activeTab}:${activeId ?? "empty"}`} headings={outlineHeadings} accent={accent} />
       </main>
     </div>
   );
@@ -361,24 +361,85 @@ function PublicHeadingToc({
   accent: "indigo" | "teal";
 }) {
   const accentClass = accent === "teal" ? "hover:bg-teal-50 hover:text-teal-700" : "hover:bg-indigo-50 hover:text-indigo-700";
+  const tree = useMemo(() => buildMarkdownHeadingTree(headings), [headings]);
+  const collapsibleKeys = useMemo(() => {
+    const keys: string[] = [];
+    const visit = (nodes: typeof tree) => nodes.forEach((node) => {
+      if (node.children.length > 0) keys.push(getMarkdownHeadingKey(node));
+      visit(node.children);
+    });
+    visit(tree);
+    return keys;
+  }, [tree]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const visibleHeadings = useMemo(() => flattenVisibleMarkdownHeadingTree(tree, collapsed), [collapsed, tree]);
+  const allCollapsed = collapsibleKeys.length > 0 && collapsibleKeys.every((key) => collapsed.has(key));
+  const toggleHeading = (key: string) => setCollapsed((current) => {
+    const next = new Set(current);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  });
 
   return (
-    <aside className="fixed right-0 top-20 hidden h-[calc(100vh-80px)] w-[280px] overflow-y-auto border-l border-gray-100 bg-white/85 px-5 py-6 backdrop-blur xl:block">
-      <div className="mb-4 font-mono text-xs font-bold uppercase tracking-[0.1em] text-gray-400">目录</div>
-      {headings.length === 0 ? (
-        <p className="py-6 text-center text-xs text-gray-400">暂无标题</p>
-      ) : (
-        <nav className="space-y-1">
-          {headings.map((heading) => (
-            <a
-              key={`${heading.id}-${heading.line}`}
-              href={`#${heading.id}`}
-              className={`block rounded-lg py-2.5 pr-2 text-[15px] leading-7 text-gray-500 transition-colors duration-200 ease-in-out ${accentClass}`}
-              style={{ paddingLeft: `${Math.max(0, heading.level - 2) * 12 + 8}px` }}
+    <aside className="fixed right-0 top-20 hidden h-[calc(100vh-80px)] w-[280px] overflow-y-auto border-l border-gray-100 bg-white/90 px-5 py-6 backdrop-blur xl:block">
+      <div className="mb-5 flex items-center justify-between border-b border-gray-100 pb-4">
+        <div className="flex items-center gap-2 text-gray-700">
+          <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${accent === "teal" ? "bg-teal-50 text-teal-600" : "bg-indigo-50 text-indigo-600"}`}>
+            <ListTree className="h-3.5 w-3.5" />
+          </span>
+          <span className="font-display text-sm font-bold">文章目录</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {collapsibleKeys.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(collapsibleKeys))}
+              className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600"
+              title={allCollapsed ? "展开全部标题" : "收起全部标题"}
             >
-              <span className={heading.level === 2 ? "font-semibold text-gray-700" : ""}>{heading.text}</span>
-            </a>
-          ))}
+              {allCollapsed ? "展开" : "收起"}
+            </button>
+          )}
+          <span className="rounded-full bg-gray-50 px-2 py-1 font-mono text-[10px] font-bold text-gray-400">{headings.length}</span>
+        </div>
+      </div>
+      {headings.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-xs leading-6 text-gray-400">正文暂无可用标题</div>
+      ) : (
+        <nav className="space-y-0.5" aria-label="文章目录">
+          {visibleHeadings.map((heading) => {
+            const key = getMarkdownHeadingKey(heading);
+            const hasChildren = heading.children.length > 0;
+            const isCollapsed = collapsed.has(key);
+            return (
+            <div
+              key={key}
+              className="group relative flex items-start rounded-lg pr-2 text-[13px] leading-5 text-gray-500 transition-colors duration-200 ease-in-out hover:bg-gray-50"
+              style={{ paddingLeft: `${heading.depth * 14 + 4}px` }}
+            >
+              {heading.depth > 0 && (
+                <span aria-hidden="true" className="absolute bottom-0 top-0 w-px bg-gray-100" style={{ left: `${heading.depth * 14 - 1}px` }} />
+              )}
+              {hasChildren ? (
+                <button
+                  type="button"
+                  onClick={() => toggleHeading(key)}
+                  className={`mt-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-colors ${accent === "teal" ? "hover:bg-teal-100 hover:text-teal-700" : "hover:bg-indigo-100 hover:text-indigo-700"}`}
+                  aria-label={isCollapsed ? `展开 ${heading.text}` : `收起 ${heading.text}`}
+                  aria-expanded={!isCollapsed}
+                >
+                  {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                </button>
+              ) : (
+                <span aria-hidden="true" className={`mx-[7px] mt-[15px] h-1.5 w-1.5 shrink-0 rounded-full ${accent === "teal" ? "bg-teal-400" : "bg-indigo-400"}`} style={{ opacity: Math.max(0.38, 1 - heading.depth * 0.16) }} />
+              )}
+              <a href={`#${heading.id}`} title={`H${heading.level} · ${heading.text}`} className={`min-w-0 flex-1 py-2 ${accentClass}`}>
+                <span className={heading.depth === 0 ? "font-semibold text-gray-700" : "font-medium"}>{heading.text}</span>
+              </a>
+            </div>
+            );
+          })}
         </nav>
       )}
     </aside>

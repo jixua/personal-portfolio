@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlignLeft, BookOpen, Briefcase, Building2, Calendar, CheckCircle2, ChevronDown, ChevronRight, Clock, Eye, FileText, GripVertical, Layers, Loader2, Plus, Save, Tag, Trash2, UploadCloud } from "lucide-react";
 import type { DocNode, Project } from "../../data";
-import { extractMarkdownHeadings, type MarkdownHeading } from "../../lib/markdown";
+import { buildMarkdownHeadingTree, extractMarkdownHeadings, flattenVisibleMarkdownHeadingTree, getMarkdownHeadingKey, type MarkdownHeading } from "../../lib/markdown";
 import { LiveMarkdownEditor } from "./LiveMarkdownEditor";
 import { DocsTree } from "./DocsTree";
 import { commaList, safeParseArray } from "./fileHelpers";
@@ -246,7 +246,7 @@ export function BlogEditorScreen({
   const [saving, setSaving] = useState(false);
   const [propsOpen, setPropsOpen] = useState(true);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
-  const headings = useMemo(() => extractMarkdownHeadings(form.content, [1, 2, 3, 4]), [form.content]);
+  const headings = useMemo(() => extractMarkdownHeadings(form.content), [form.content]);
   const categoryOptions = useMemo(() => {
     const categories = new Set<string>();
     for (const post of posts) {
@@ -378,7 +378,7 @@ export function BlogEditorScreen({
           </div>
         </div>
       </main>
-      <HeadingTree headings={headings} onSelect={scrollToHeading} />
+      <HeadingTree key={`blog-${active?.id ?? "new"}`} headings={headings} onSelect={scrollToHeading} />
     </div>
   );
 }
@@ -408,7 +408,7 @@ export function DocsEditorScreen({
   const [form, setForm] = useState({ title: active?.title ?? "", content: active?.content ?? "" });
   const [saving, setSaving] = useState(false);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
-  const headings = useMemo(() => extractMarkdownHeadings(form.content, [1, 2, 3, 4]), [form.content]);
+  const headings = useMemo(() => extractMarkdownHeadings(form.content), [form.content]);
   useEffect(() => {
     setActiveId((current) => {
       const editable = findEditableDoc(docs, current);
@@ -493,7 +493,7 @@ export function DocsEditorScreen({
           </div>
         </div>
       </main>
-      <HeadingTree headings={headings} onSelect={scrollToHeading} />
+      <HeadingTree key={`doc-${active?.id ?? "empty"}`} headings={headings} onSelect={scrollToHeading} />
     </div>
   );
 }
@@ -646,12 +646,45 @@ function EditorHeader({
   );
 }
 function HeadingTree({ headings, onSelect }: { headings: MarkdownHeading[]; onSelect: (heading: MarkdownHeading) => void }) {
+  const tree = useMemo(() => buildMarkdownHeadingTree(headings), [headings]);
+  const collapsibleKeys = useMemo(() => {
+    const keys: string[] = [];
+    const visit = (nodes: typeof tree) => nodes.forEach((node) => {
+      if (node.children.length > 0) keys.push(getMarkdownHeadingKey(node));
+      visit(node.children);
+    });
+    visit(tree);
+    return keys;
+  }, [tree]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const visibleHeadings = useMemo(() => flattenVisibleMarkdownHeadingTree(tree, collapsed), [collapsed, tree]);
+  const allCollapsed = collapsibleKeys.length > 0 && collapsibleKeys.every((key) => collapsed.has(key));
+  const toggleHeading = (key: string) => setCollapsed((current) => {
+    const next = new Set(current);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  });
+
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-gray-100 bg-white">
-      <div className="flex min-h-14 shrink-0 items-center border-b border-gray-100 px-4">
-        <div>
+      <div className="flex min-h-14 shrink-0 items-center justify-between border-b border-gray-100 px-4">
+        <div className="min-w-0">
           <div className="font-mono text-[10px] font-bold uppercase tracking-widest text-gray-400">Outline</div>
           <div className="mt-0.5 font-display text-[15px] font-bold text-gray-900">标题树</div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {collapsibleKeys.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(collapsibleKeys))}
+              className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600"
+              title={allCollapsed ? "展开全部标题" : "收起全部标题"}
+            >
+              {allCollapsed ? "展开" : "收起"}
+            </button>
+          )}
+          <span className="rounded-full bg-gray-50 px-2 py-1 font-mono text-[10px] font-bold text-gray-400">{headings.length}</span>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
@@ -660,18 +693,47 @@ function HeadingTree({ headings, onSelect }: { headings: MarkdownHeading[]; onSe
             暂无标题
           </div>
         ) : (
-          <div className="space-y-1">
-            {headings.map((heading) => (
-              <button
-                key={`${heading.id}-${heading.line}`}
-                type="button"
-                onClick={() => onSelect(heading)}
-                className="block w-full rounded-lg px-2 py-1.5 text-left text-xs leading-5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"
-                style={{ paddingLeft: `${(heading.level - 1) * 10 + 8}px` }}
+          <div className="space-y-0.5">
+            {visibleHeadings.map((heading) => {
+              const key = getMarkdownHeadingKey(heading);
+              const hasChildren = heading.children.length > 0;
+              const isCollapsed = collapsed.has(key);
+              return (
+              <div
+                key={key}
+                className="group relative flex w-full items-start rounded-lg py-1 pr-2 text-xs leading-5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"
+                style={{ paddingLeft: `${heading.depth * 12 + 4}px` }}
               >
-                <span className={heading.level <= 2 ? "font-bold text-gray-700" : "font-medium"}>{heading.text}</span>
-              </button>
-            ))}
+                {heading.depth > 0 && (
+                  <span aria-hidden="true" className="absolute bottom-0 top-0 w-px bg-gray-100" style={{ left: `${heading.depth * 12 + 1}px` }} />
+                )}
+                {hasChildren ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleHeading(key)}
+                    className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700"
+                    aria-label={isCollapsed ? `展开 ${heading.text}` : `收起 ${heading.text}`}
+                    aria-expanded={!isCollapsed}
+                  >
+                    {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+                ) : (
+                  <span aria-hidden="true" className="h-5 w-5 shrink-0" />
+                )}
+                <button
+                  type="button"
+                  onClick={() => onSelect(heading)}
+                  title={`${heading.hasSkippedLevel ? "存在标题跳级 · " : ""}H${heading.level} · 第 ${heading.line} 行`}
+                  className="flex min-w-0 flex-1 items-start gap-2 py-1 text-left"
+                >
+                  <span className={`mt-0.5 shrink-0 rounded px-1.5 py-px font-mono text-[9px] font-bold leading-4 ${heading.hasSkippedLevel ? "bg-amber-50 text-amber-600" : heading.depth === 0 ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-400 group-hover:text-gray-600"}`}>
+                    H{heading.level}
+                  </span>
+                  <span className={`min-w-0 break-words ${heading.depth === 0 ? "font-bold text-gray-700" : "font-medium"}`}>{heading.text}</span>
+                </button>
+              </div>
+              );
+            })}
           </div>
         )}
       </div>
