@@ -381,6 +381,7 @@ export function LiveMarkdownEditor({
   const skipNextChangeRef = useRef(false);
   const lastDocKeyRef = useRef(docKey);
   const articleRef = useRef<HTMLDivElement | null>(null);
+  const wholeEditorSelectedRef = useRef(false);
   onChangeRef.current = onChange;
 
   useEffect(() => {
@@ -390,6 +391,7 @@ export function LiveMarkdownEditor({
     if (docChanged) {
       caretHintRef.current = null;
       lastFocusedRef.current = null;
+      wholeEditorSelectedRef.current = false;
       setFocusLine(null);
       setFocusNonce(0);
     }
@@ -423,10 +425,89 @@ export function LiveMarkdownEditor({
     }
   };
 
+  const selectWholeEditor = () => {
+    if (!articleRef.current) return;
+    wholeEditorSelectedRef.current = true;
+    selectElementContents(articleRef.current);
+  };
+
+  const replaceWholeEditorSelection = (text: string) => {
+    const normalized = text.replace(/\r\n?/g, "\n");
+    const next = normalized.split("\n");
+    wholeEditorSelectedRef.current = false;
+    window.getSelection()?.removeAllRanges();
+    commit(next.length > 0 ? next : [""], next.length - 1, next[next.length - 1]?.length ?? 0);
+  };
+
+  const handleEditorKeyDownCapture = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!wholeEditorSelectedRef.current) return;
+
+    const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && ["a", "c", "x"].includes(key)) {
+      if (key === "a") {
+        event.preventDefault();
+        selectWholeEditor();
+      }
+      return;
+    }
+
+    if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      event.stopPropagation();
+      replaceWholeEditorSelection("");
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      replaceWholeEditorSelection("");
+      return;
+    }
+
+    if (["ArrowLeft", "ArrowUp", "Home"].includes(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      wholeEditorSelectedRef.current = false;
+      window.getSelection()?.removeAllRanges();
+      commit(lines, 0, 0);
+      return;
+    }
+
+    if (["ArrowRight", "ArrowDown", "End"].includes(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      wholeEditorSelectedRef.current = false;
+      window.getSelection()?.removeAllRanges();
+      const lastLine = Math.max(0, lines.length - 1);
+      commit(lines, lastLine, lines[lastLine]?.length ?? 0);
+      return;
+    }
+
+    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      replaceWholeEditorSelection(event.key);
+    }
+  };
+
+  const handleCopy = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    if (!wholeEditorSelectedRef.current) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", lines.join("\n"));
+  };
+
+  const handleCut = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    if (!wholeEditorSelectedRef.current) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", lines.join("\n"));
+    replaceWholeEditorSelection("");
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && isElementFullySelected(event.currentTarget)) {
       event.preventDefault();
-      if (articleRef.current) selectElementContents(articleRef.current);
+      selectWholeEditor();
     } else if (event.key === "Enter") {
       event.preventDefault();
       const offset = getCaretOffset(event.currentTarget);
@@ -531,10 +612,13 @@ export function LiveMarkdownEditor({
     if (images.length === 0) return;
     event.preventDefault();
     const placeholders = images.map((_, index) => `![图片上传中 ${index + 1}](uploading://clipboard-image-${Date.now()}-${index})`);
-    const index = focusLine ?? lines.length - 1;
-    const next = [...lines];
-    next.splice(index + 1, 0, ...placeholders);
-    commit(next, index + 1, null);
+    const replacingWholeEditor = wholeEditorSelectedRef.current;
+    const index = replacingWholeEditor ? -1 : focusLine ?? lines.length - 1;
+    const next = replacingWholeEditor ? placeholders : [...lines];
+    if (!replacingWholeEditor) next.splice(index + 1, 0, ...placeholders);
+    wholeEditorSelectedRef.current = false;
+    window.getSelection()?.removeAllRanges();
+    commit(next, replacingWholeEditor ? 0 : index + 1, null);
     setPasteUploadCount((count) => count + images.length);
 
     await Promise.all(images.map(async (file, index) => {
@@ -550,8 +634,27 @@ export function LiveMarkdownEditor({
     }));
   };
 
+  const handlePasteCapture = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    if (getClipboardImageFiles(event.clipboardData).length > 0) {
+      void handlePasteImages(event);
+      return;
+    }
+    if (!wholeEditorSelectedRef.current) return;
+    const text = event.clipboardData.getData("text/plain");
+    event.preventDefault();
+    event.stopPropagation();
+    replaceWholeEditorSelection(text);
+  };
+
   return (
-    <div className="le-root rounded-none bg-white" onPasteCapture={handlePasteImages}>
+    <div
+      className="le-root rounded-none bg-white"
+      onCopyCapture={handleCopy}
+      onCutCapture={handleCut}
+      onKeyDownCapture={handleEditorKeyDownCapture}
+      onMouseDownCapture={() => { wholeEditorSelectedRef.current = false; }}
+      onPasteCapture={handlePasteCapture}
+    >
       <div className="sticky top-0 z-10 flex items-center gap-1 border-b border-gray-100 bg-white/90 px-1 py-1.5 backdrop-blur">
         <ToolbarButton title="标题" icon={<Heading2 />} onClick={() => applyLinePrefix((text) => `## ${text.replace(/^#{1,6}\s+/, "") || "标题"}`)} />
         <ToolbarButton title="引用" icon={<Quote />} onClick={() => applyLinePrefix((text) => `> ${text.replace(/^>\s?/, "")}`)} />
@@ -580,7 +683,7 @@ export function LiveMarkdownEditor({
                 onBlurBlock={() => setFocusLine((current) => (current != null && current >= block.startLine && current <= block.endLine ? null : current))}
                 onChangeValue={(value) => replaceBlockLines(block, value)}
                 onSelectAll={() => {
-                  if (articleRef.current) selectElementContents(articleRef.current);
+                  selectWholeEditor();
                 }}
               />
             );
