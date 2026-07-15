@@ -444,6 +444,12 @@ body {
     cursor: text;
   }
 
+  .le-editable-line:empty::before {
+    content: attr(data-placeholder);
+    color: #d1d5db;
+    pointer-events: none;
+  }
+
   .le-md-token {
     white-space: pre-wrap;
   }

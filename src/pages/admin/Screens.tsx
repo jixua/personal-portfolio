@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlignLeft, BookOpen, Briefcase, Building2, Calendar, CheckCircle2, ChevronDown, ChevronRight, Clock, Eye, FileText, GripVertical, Layers, Loader2, Plus, Save, Tag, Trash2, UploadCloud } from "lucide-react";
+import { AlignLeft, BookOpen, Briefcase, Building2, Calendar, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Clock, Eye, FileText, GripVertical, Layers, ListTree, Loader2, Plus, Save, Tag, Trash2, UploadCloud } from "lucide-react";
 import type { DocNode, Project } from "../../data";
 import { buildMarkdownHeadingTree, extractMarkdownHeadings, flattenVisibleMarkdownHeadingTree, getMarkdownHeadingKey, type MarkdownHeading } from "../../lib/markdown";
 import { LiveMarkdownEditor } from "./LiveMarkdownEditor";
@@ -311,7 +311,7 @@ export function BlogEditorScreen({
     }
   };
   return (
-    <div className="grid h-full min-h-0 overflow-hidden grid-cols-[240px_minmax(0,1fr)_240px]">
+    <div className="grid h-full min-h-0 overflow-hidden grid-cols-[240px_minmax(0,1fr)_264px]">
       <EditorList title="全部文章" addLabel="新建文章" count={visiblePosts.length} onAdd={createPost}>
         {visiblePosts.map((post) => (
           <EditorListRow
@@ -378,7 +378,7 @@ export function BlogEditorScreen({
           </div>
         </div>
       </main>
-      <HeadingTree key={`blog-${active?.id ?? "new"}`} headings={headings} onSelect={scrollToHeading} />
+      <HeadingTree key={`blog-${active?.id ?? "new"}`} headings={headings} onSelect={scrollToHeading} accent="blog" />
     </div>
   );
 }
@@ -465,7 +465,7 @@ export function DocsEditorScreen({
     await onRefresh();
   };
   return (
-    <div className="grid h-full min-h-0 overflow-hidden grid-cols-[240px_minmax(0,1fr)_240px]">
+    <div className="grid h-full min-h-0 overflow-hidden grid-cols-[240px_minmax(0,1fr)_264px]">
       <aside className="h-full min-h-0 overflow-y-auto border-r border-gray-100 px-3 py-[18px]">
         <DocsTree docs={docs} activeId={activeId} onSelect={(node) => setActiveId(node.id)} onNewRoot={(isFolder) => createDoc(null, isFolder)} onNewChild={(parentId, isFolder) => createDoc(parentId, isFolder)} onRename={rename} onDelete={remove} onMove={move} />
       </aside>
@@ -493,7 +493,7 @@ export function DocsEditorScreen({
           </div>
         </div>
       </main>
-      <HeadingTree key={`doc-${active?.id ?? "empty"}`} headings={headings} onSelect={scrollToHeading} />
+      <HeadingTree key={`doc-${active?.id ?? "empty"}`} headings={headings} onSelect={scrollToHeading} accent="docs" />
     </div>
   );
 }
@@ -645,7 +645,15 @@ function EditorHeader({
     </div>
   );
 }
-function HeadingTree({ headings, onSelect }: { headings: MarkdownHeading[]; onSelect: (heading: MarkdownHeading) => void }) {
+function HeadingTree({
+  headings,
+  onSelect,
+  accent,
+}: {
+  headings: MarkdownHeading[];
+  onSelect: (heading: MarkdownHeading) => void;
+  accent: "blog" | "docs";
+}) {
   const tree = useMemo(() => buildMarkdownHeadingTree(headings), [headings]);
   const collapsibleKeys = useMemo(() => {
     const keys: string[] = [];
@@ -657,8 +665,22 @@ function HeadingTree({ headings, onSelect }: { headings: MarkdownHeading[]; onSe
     return keys;
   }, [tree]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const visibleHeadings = useMemo(() => flattenVisibleMarkdownHeadingTree(tree, collapsed), [collapsed, tree]);
   const allCollapsed = collapsibleKeys.length > 0 && collapsibleKeys.every((key) => collapsed.has(key));
+  const accentStyles = accent === "docs"
+    ? {
+        icon: "bg-rose-50 text-[var(--seal)] ring-rose-100",
+        active: "bg-rose-50/80 text-[var(--seal)] ring-rose-100/80",
+        activeRail: "bg-[var(--seal)]",
+        activeLevel: "bg-white text-[var(--seal)] ring-rose-100",
+      }
+    : {
+        icon: "bg-indigo-50 text-[var(--signal-indigo-600)] ring-indigo-100",
+        active: "bg-indigo-50/80 text-[var(--signal-indigo-600)] ring-indigo-100/80",
+        activeRail: "bg-[var(--signal-indigo-600)]",
+        activeLevel: "bg-white text-[var(--signal-indigo-600)] ring-indigo-100",
+      };
   const toggleHeading = (key: string) => setCollapsed((current) => {
     const next = new Set(current);
     if (next.has(key)) next.delete(key);
@@ -667,69 +689,83 @@ function HeadingTree({ headings, onSelect }: { headings: MarkdownHeading[]; onSe
   });
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-l border-gray-100 bg-white">
-      <div className="flex min-h-14 shrink-0 items-center justify-between border-b border-gray-100 px-4">
-        <div className="min-w-0">
-          <div className="font-mono text-[10px] font-bold uppercase tracking-widest text-gray-400">Outline</div>
-          <div className="mt-0.5 font-display text-[15px] font-bold text-gray-900">标题树</div>
+    <aside className="flex h-full min-h-0 flex-col border-l border-gray-100 bg-[#fcfcfd]">
+      <div className="flex min-h-16 shrink-0 items-center justify-between border-b border-gray-100 bg-white/80 px-4 backdrop-blur-sm">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] ring-1 ${accentStyles.icon}`}>
+            <ListTree className="h-4 w-4" strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0">
+            <div className="font-display text-[14px] font-bold text-gray-900">文章目录</div>
+            <div className="mt-0.5 text-[10.5px] text-gray-400">{headings.length > 0 ? `${headings.length} 个标题节点` : "根据标题自动生成"}</div>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          {collapsibleKeys.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(collapsibleKeys))}
-              className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600"
-              title={allCollapsed ? "展开全部标题" : "收起全部标题"}
-            >
-              {allCollapsed ? "展开" : "收起"}
-            </button>
-          )}
-          <span className="rounded-full bg-gray-50 px-2 py-1 font-mono text-[10px] font-bold text-gray-400">{headings.length}</span>
-        </div>
+        {collapsibleKeys.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(collapsibleKeys))}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-all hover:bg-gray-100 hover:text-gray-700"
+            title={allCollapsed ? "展开全部标题" : "收起全部标题"}
+            aria-label={allCollapsed ? "展开全部标题" : "收起全部标题"}
+          >
+            {allCollapsed ? <ChevronsUpDown className="h-3.5 w-3.5" /> : <ChevronsDownUp className="h-3.5 w-3.5" />}
+          </button>
+        )}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3.5">
         {headings.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-100 px-3 py-8 text-center text-xs leading-5 text-gray-400">
-            暂无标题
+          <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white/70 px-4 text-center">
+            <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-300">
+              <ListTree className="h-4 w-4" />
+            </span>
+            <div className="text-xs font-semibold text-gray-500">暂无文章目录</div>
+            <div className="mt-1.5 text-[10.5px] leading-4 text-gray-400">输入 Markdown 标题后<br />将在这里生成层级结构</div>
           </div>
         ) : (
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {visibleHeadings.map((heading) => {
               const key = getMarkdownHeadingKey(heading);
               const hasChildren = heading.children.length > 0;
               const isCollapsed = collapsed.has(key);
+              const isActive = activeKey === key;
               return (
               <div
                 key={key}
-                className="group relative flex w-full items-start rounded-lg py-1 pr-2 text-xs leading-5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"
-                style={{ paddingLeft: `${heading.depth * 12 + 4}px` }}
+                className={`group relative flex w-full items-center rounded-[10px] py-1.5 pr-2 text-xs leading-5 ring-1 ring-transparent transition-all duration-150 ${isActive ? accentStyles.active : "text-gray-500 hover:bg-white hover:text-gray-900 hover:shadow-sm hover:ring-gray-100"}`}
+                style={{ paddingLeft: `${heading.depth * 14 + 5}px` }}
               >
+                {isActive && <span aria-hidden="true" className={`absolute bottom-2 left-0 top-2 w-0.5 rounded-r-full ${accentStyles.activeRail}`} />}
                 {heading.depth > 0 && (
-                  <span aria-hidden="true" className="absolute bottom-0 top-0 w-px bg-gray-100" style={{ left: `${heading.depth * 12 + 1}px` }} />
+                  <span aria-hidden="true" className="absolute -bottom-1 -top-1 w-px bg-gray-200/80" style={{ left: `${heading.depth * 14 - 3}px` }} />
                 )}
                 {hasChildren ? (
                   <button
                     type="button"
                     onClick={() => toggleHeading(key)}
-                    className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 transition-all hover:bg-white hover:text-gray-700 hover:shadow-sm"
                     aria-label={isCollapsed ? `展开 ${heading.text}` : `收起 ${heading.text}`}
                     aria-expanded={!isCollapsed}
                   >
-                    {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                    {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} /> : <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />}
                   </button>
                 ) : (
-                  <span aria-hidden="true" className="h-5 w-5 shrink-0" />
+                  <span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center">
+                    <span className={`h-1.5 w-1.5 rounded-full ${isActive ? accentStyles.activeRail : "bg-gray-300 group-hover:bg-gray-400"}`} />
+                  </span>
                 )}
                 <button
                   type="button"
-                  onClick={() => onSelect(heading)}
+                  onClick={() => {
+                    setActiveKey(key);
+                    onSelect(heading);
+                  }}
                   title={`${heading.hasSkippedLevel ? "存在标题跳级 · " : ""}H${heading.level} · 第 ${heading.line} 行`}
-                  className="flex min-w-0 flex-1 items-start gap-2 py-1 text-left"
+                  className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
                 >
-                  <span className={`mt-0.5 shrink-0 rounded px-1.5 py-px font-mono text-[9px] font-bold leading-4 ${heading.hasSkippedLevel ? "bg-amber-50 text-amber-600" : heading.depth === 0 ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-400 group-hover:text-gray-600"}`}>
+                  <span className={`min-w-0 flex-1 truncate ${heading.depth === 0 ? "font-bold" : "font-medium"}`}>{heading.text}</span>
+                  <span className={`shrink-0 rounded-md px-1.5 font-mono text-[9px] font-bold leading-[18px] ring-1 ${heading.hasSkippedLevel ? "bg-amber-50 text-amber-600 ring-amber-100" : isActive ? accentStyles.activeLevel : "bg-gray-50 text-gray-400 ring-gray-100 group-hover:bg-white"}`}>
                     H{heading.level}
                   </span>
-                  <span className={`min-w-0 break-words ${heading.depth === 0 ? "font-bold text-gray-700" : "font-medium"}`}>{heading.text}</span>
                 </button>
               </div>
               );

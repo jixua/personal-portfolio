@@ -186,6 +186,7 @@ function RawLine({
   startLine,
   caretHint,
   focusNonce,
+  placeholder,
   onKeyDown,
   onFocusLine,
   onInputCommit,
@@ -196,6 +197,7 @@ function RawLine({
   startLine: number;
   caretHint: number | null;
   focusNonce: number;
+  placeholder?: string;
   onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
   onFocusLine: (line: number) => void;
   onInputCommit: (target: HTMLDivElement, line: number, toRaw: (value: string) => string) => void;
@@ -225,6 +227,7 @@ function RawLine({
       <div
         ref={ref}
         contentEditable
+        data-placeholder={placeholder}
         suppressContentEditableWarning
         spellCheck={false}
         onFocus={() => {
@@ -355,11 +358,11 @@ function rawLineClass(line: string) {
   const type = classifyLine(line);
   if (type.type === "heading") {
     const heading = headingClasses[type.level] ?? headingClasses[6];
-    return `min-w-0 min-h-[1.2em] flex-1 whitespace-pre-wrap break-words font-display font-black tracking-tight outline-none ${heading.color} ${heading.size}`;
+    return `le-editable-line min-w-0 min-h-[1.2em] flex-1 whitespace-pre-wrap break-words font-display font-black tracking-tight outline-none ${heading.color} ${heading.size}`;
   }
-  if (type.type === "quote") return "min-w-0 min-h-[1.75rem] flex-1 text-lg leading-8 text-gray-700 outline-none";
-  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return "min-w-0 min-h-[2rem] flex-1 whitespace-pre-wrap break-words text-lg leading-8 text-gray-700 outline-none";
-  return "min-w-0 min-h-[2rem] flex-1 whitespace-pre-wrap break-words text-lg leading-8 text-gray-700 outline-none";
+  if (type.type === "quote") return "le-editable-line min-w-0 min-h-[1.75rem] flex-1 text-lg leading-8 text-gray-700 outline-none";
+  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return "le-editable-line min-w-0 min-h-[2rem] flex-1 whitespace-pre-wrap break-words text-lg leading-8 text-gray-700 outline-none";
+  return "le-editable-line min-w-0 min-h-[2rem] flex-1 whitespace-pre-wrap break-words text-lg leading-8 text-gray-700 outline-none";
 }
 
 function PreviewShell({ markdown, line, onFocus }: { markdown: string; line: number; onFocus: (line: number) => void }) {
@@ -405,6 +408,10 @@ export function LiveMarkdownEditor({
   const lastDocKeyRef = useRef(docKey);
   const articleRef = useRef<HTMLDivElement | null>(null);
   const wholeEditorSelectedRef = useRef(false);
+  const linesRef = useRef(lines);
+  const historyRef = useRef<{ past: string[][]; future: string[][] }>({ past: [], future: [] });
+  const historyGroupRef = useRef<{ key: string; time: number } | null>(null);
+  linesRef.current = lines;
   onChangeRef.current = onChange;
 
   useEffect(() => {
@@ -415,6 +422,8 @@ export function LiveMarkdownEditor({
       caretHintRef.current = null;
       lastFocusedRef.current = null;
       wholeEditorSelectedRef.current = false;
+      historyRef.current = { past: [], future: [] };
+      historyGroupRef.current = null;
       setFocusLine(null);
       setFocusNonce(0);
     }
@@ -438,6 +447,24 @@ export function LiveMarkdownEditor({
   }, [focusLine]);
 
   const blocks = useMemo(() => groupBlocks(lines), [lines]);
+  const editorIsEmpty = lines.length === 1 && lines[0] === "";
+
+  const rememberCurrentState = (groupKey?: string) => {
+    const now = Date.now();
+    const currentGroup = historyGroupRef.current;
+    if (groupKey && currentGroup?.key === groupKey && now - currentGroup.time < 1000) {
+      historyGroupRef.current = { key: groupKey, time: now };
+      return;
+    }
+    const current = [...linesRef.current];
+    const past = historyRef.current.past;
+    const previous = past[past.length - 1];
+    if (!previous || previous.join("\n") !== current.join("\n")) {
+      historyRef.current.past = [...past.slice(-99), current];
+    }
+    historyRef.current.future = [];
+    historyGroupRef.current = groupKey ? { key: groupKey, time: now } : null;
+  };
 
   const commit = (
     updater: string[] | ((current: string[]) => string[]),
@@ -461,15 +488,48 @@ export function LiveMarkdownEditor({
   const replaceWholeEditorSelection = (text: string) => {
     const normalized = text.replace(/\r\n?/g, "\n");
     const next = normalized.split("\n");
+    if (next.join("\n") !== linesRef.current.join("\n")) rememberCurrentState();
     wholeEditorSelectedRef.current = false;
     window.getSelection()?.removeAllRanges();
     commit(next.length > 0 ? next : [""], next.length - 1, next[next.length - 1]?.length ?? 0);
   };
 
+  const restoreHistory = (direction: "undo" | "redo") => {
+    const history = historyRef.current;
+    const source = direction === "undo" ? history.past : history.future;
+    const target = source[source.length - 1];
+    if (!target) return;
+    const current = [...linesRef.current];
+    if (direction === "undo") {
+      history.past = source.slice(0, -1);
+      history.future = [...history.future, current];
+    } else {
+      history.future = source.slice(0, -1);
+      history.past = [...history.past, current];
+    }
+    historyGroupRef.current = null;
+    wholeEditorSelectedRef.current = false;
+    window.getSelection()?.removeAllRanges();
+    const lastLine = Math.max(0, target.length - 1);
+    commit([...target], lastLine, target[lastLine]?.length ?? 0);
+  };
+
   const handleEditorKeyDownCapture = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && key === "z") {
+      event.preventDefault();
+      event.stopPropagation();
+      restoreHistory(event.shiftKey ? "redo" : "undo");
+      return;
+    }
+    if (event.ctrlKey && !event.metaKey && key === "y") {
+      event.preventDefault();
+      event.stopPropagation();
+      restoreHistory("redo");
+      return;
+    }
     if (!wholeEditorSelectedRef.current) return;
 
-    const key = event.key.toLowerCase();
     if ((event.metaKey || event.ctrlKey) && ["a", "c", "x"].includes(key)) {
       if (key === "a") {
         event.preventDefault();
@@ -537,6 +597,7 @@ export function LiveMarkdownEditor({
       selectWholeEditor();
     } else if (event.key === "Enter") {
       event.preventDefault();
+      rememberCurrentState();
       const offset = getCaretOffset(event.currentTarget);
       const text = event.currentTarget.textContent || "";
       commit(
@@ -553,6 +614,7 @@ export function LiveMarkdownEditor({
       const offset = getCaretOffset(event.currentTarget);
       if (offset === 0 && startLine > 0) {
         event.preventDefault();
+        rememberCurrentState();
         const text = event.currentTarget.textContent || "";
         setLines((current) => {
           const next = [...current];
@@ -584,9 +646,11 @@ export function LiveMarkdownEditor({
 
   const handleBlurCommit = (event: React.FocusEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
     const text = event.currentTarget.textContent || "";
+    const raw = toRaw(text);
+    if (linesRef.current[startLine] !== raw) rememberCurrentState(`typing:${startLine}`);
     setLines((current) => {
       const next = [...current];
-      next[startLine] = toRaw(text);
+      next[startLine] = raw;
       return next;
     });
     setFocusLine((current) => (current === startLine ? null : current));
@@ -594,6 +658,7 @@ export function LiveMarkdownEditor({
 
   const handleInputCommit = (target: HTMLDivElement, startLine: number, toRaw: (value: string) => string) => {
     const raw = toRaw(target.textContent || "");
+    if (linesRef.current[startLine] !== raw) rememberCurrentState(`typing:${startLine}`);
     setLines((current) => {
       if (current[startLine] === raw) return current;
       const next = [...current];
@@ -606,6 +671,7 @@ export function LiveMarkdownEditor({
     const text = event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");
     if (!text) return;
     event.preventDefault();
+    rememberCurrentState();
 
     if (!text.includes("\n")) {
       document.execCommand("insertText", false, text);
@@ -638,6 +704,7 @@ export function LiveMarkdownEditor({
   const applyLinePrefix = (mutate: (value: string) => string) => {
     const index = lastFocusedRef.current ?? Math.max(0, lines.length - 1);
     const nextValue = mutate(lines[index] || "");
+    rememberCurrentState();
     commit(
       (current) => {
         const next = [...current];
@@ -651,6 +718,7 @@ export function LiveMarkdownEditor({
 
   const insertBlock = (templateLines: string[]) => {
     const index = lastFocusedRef.current != null ? lastFocusedRef.current + 1 : lines.length;
+    rememberCurrentState();
     commit(
       (current) => {
         const next = [...current];
@@ -667,6 +735,9 @@ export function LiveMarkdownEditor({
   };
 
   const replaceBlockLines = (block: MarkdownBlock, value: string) => {
+    if (linesRef.current.slice(block.startLine, block.endLine + 1).join("\n") !== value) {
+      rememberCurrentState(`block:${block.startLine}`);
+    }
     setLines((current) => {
       const next = [...current];
       next.splice(block.startLine, block.endLine - block.startLine + 1, ...value.split("\n"));
@@ -681,6 +752,7 @@ export function LiveMarkdownEditor({
     const placeholders = images.map((_, index) => `![图片上传中 ${index + 1}](uploading://clipboard-image-${Date.now()}-${index})`);
     const replacingWholeEditor = wholeEditorSelectedRef.current;
     const index = replacingWholeEditor ? -1 : focusLine ?? lines.length - 1;
+    rememberCurrentState();
     wholeEditorSelectedRef.current = false;
     window.getSelection()?.removeAllRanges();
     commit(
@@ -742,7 +814,7 @@ export function LiveMarkdownEditor({
         <ToolbarButton title="分割线" icon={<Minus />} onClick={() => insertBlock(["---"])} />
         {pasteUploadCount > 0 && <span className="ml-auto pr-2 font-mono text-[11px] font-bold text-amber-600">正在上传 {pasteUploadCount} 张图片</span>}
       </div>
-      <div ref={articleRef} className="px-0 py-2 pb-16">
+      <div ref={articleRef} className="min-h-[240px] px-0 py-2 pb-16">
         {blocks.map((block) => {
           const focused = focusLine != null && focusLine >= block.startLine && focusLine <= block.endLine;
           if (block.type !== "line") {
@@ -770,6 +842,7 @@ export function LiveMarkdownEditor({
               startLine={block.startLine}
               caretHint={caretHintRef.current}
               focusNonce={focusLine === block.startLine ? focusNonce : 0}
+              placeholder={editorIsEmpty ? "开始输入内容…" : undefined}
               onFocusLine={setFocusLine}
               onInputCommit={handleInputCommit}
               onKeyDown={handleKeyDown}
@@ -778,7 +851,19 @@ export function LiveMarkdownEditor({
             />
           );
         })}
-        <div onClick={() => commit((current) => [...current, ""], lines.length, 0)} className="h-10 cursor-text" />
+        {editorIsEmpty && (
+          <div className="pointer-events-none -mt-3 flex items-center gap-2 text-[11px] text-gray-300">
+            <span>内容已清空</span>
+            <span className="rounded border border-gray-100 bg-gray-50 px-1.5 py-0.5 font-mono">⌘ Z 撤销</span>
+          </div>
+        )}
+        <div
+          onClick={() => {
+            rememberCurrentState();
+            commit((current) => [...current, ""], lines.length, 0);
+          }}
+          className="h-10 cursor-text"
+        />
       </div>
     </div>
   );
