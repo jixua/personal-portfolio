@@ -5,6 +5,8 @@ import { useData } from "../context/DataContext";
 
 export function Blog() {
   const { posts: blogPosts, loading } = useData();
+  const featuredPosts = blogPosts.slice(0, 3);
+
   return (
     <section id="blog" className="py-24 px-6 relative z-10 overflow-hidden">
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-16 lg:gap-8">
@@ -35,7 +37,7 @@ export function Blog() {
               数据库中暂无文章内容。
             </div>
           ) : (
-            blogPosts.map((post, idx) => (
+            featuredPosts.map((post, idx) => (
               <motion.div
                 key={post.id}
                 initial={{ opacity: 0, x: 20 }}
