@@ -109,6 +109,17 @@ body {
     height: auto;
   }
 
+  .markdown-body .mermaid-rendered foreignObject,
+  .mermaid-preview foreignObject {
+    overflow: visible;
+  }
+
+  .markdown-body .mermaid-rendered .nodeLabel p,
+  .mermaid-preview .nodeLabel p {
+    margin: 0;
+    line-height: 1.5;
+  }
+
   .markdown-body .katex-display {
     overflow-x: auto;
     overflow-y: hidden;

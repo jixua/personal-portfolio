@@ -70,6 +70,11 @@ async function getMermaidInstance() {
   return mermaid;
 }
 
+async function waitForMermaidFonts() {
+  if (typeof document === "undefined" || !document.fonts) return;
+  await document.fonts.ready;
+}
+
 const headingSizeClasses: Record<1 | 2 | 3 | 4 | 5 | 6, string> = {
   1: "text-3xl md:text-4xl mt-0 mb-8",
   2: "text-2xl md:text-3xl mt-12 mb-5 border-b border-gray-100 pb-3",
@@ -233,7 +238,7 @@ function MediaPreviewOverlay({
           <div className="flex min-h-[calc(100vh-8rem)] items-center justify-center">
             {content.type === "html" ? (
               <div
-                className="inline-block max-w-none bg-white text-slate-900 shadow-2xl"
+                className="mermaid-preview inline-block max-w-none bg-white text-slate-900 shadow-2xl"
                 style={zoomStyle}
                 onClick={(event) => event.stopPropagation()}
                 dangerouslySetInnerHTML={{ __html: content.html }}
@@ -310,6 +315,9 @@ function MermaidBlock({ code }: { code: string }) {
         const mermaid = await getMermaidInstance();
         setError(null);
         setSvg("");
+
+        await waitForMermaidFonts();
+        if (cancelled) return;
 
         const safeId = reactId.replace(/[^a-zA-Z0-9_-]/g, "");
         mermaidRenderCounter += 1;

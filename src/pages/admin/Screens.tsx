@@ -4,7 +4,7 @@ import type { DocNode, Project } from "../../data";
 import { buildMarkdownHeadingTree, extractMarkdownHeadings, flattenVisibleMarkdownHeadingTree, getMarkdownHeadingKey, type MarkdownHeading } from "../../lib/markdown";
 import { LiveMarkdownEditor } from "./LiveMarkdownEditor";
 import { DocsTree } from "./DocsTree";
-import { commaList, safeParseArray } from "./fileHelpers";
+import { commaList, getMarkdownTitleFromFileName, safeParseArray } from "./fileHelpers";
 import type { AdminTab, ApiExperience, ApiPost, ApiProject, UploadMarkdownAsset } from "./types";
 
 export function countDocs(nodes: DocNode[]): number {
@@ -349,7 +349,7 @@ export function BlogEditorScreen({
           onSave={save}
           canSave={!!form.title.trim()}
           pendingImportCount={pendingImportCount}
-          importMarkdown={(files) => importMarkdown(files, (markdown, file) => setForm((current) => ({ ...current, content: markdown, title: current.title || file.name.replace(/\.(md|markdown)$/i, "") })))}
+          importMarkdown={(files) => importMarkdown(files, (markdown, file) => setForm((current) => ({ ...current, content: markdown, title: getMarkdownTitleFromFileName(file.name) })))}
           requestAssetDirectory={requestAssetDirectory}
           requestAssetFiles={requestAssetFiles}
         />
@@ -478,7 +478,7 @@ export function DocsEditorScreen({
           onSave={save}
           canSave={!!active && !!form.title.trim()}
           pendingImportCount={pendingImportCount}
-          importMarkdown={(files) => importMarkdown(files, (markdown, file) => setForm((current) => ({ ...current, content: markdown, title: current.title || file.name.replace(/\.(md|markdown)$/i, "") })))}
+          importMarkdown={(files) => importMarkdown(files, (markdown, file) => setForm((current) => ({ ...current, content: markdown, title: getMarkdownTitleFromFileName(file.name) })))}
           requestAssetDirectory={requestAssetDirectory}
           requestAssetFiles={requestAssetFiles}
         />

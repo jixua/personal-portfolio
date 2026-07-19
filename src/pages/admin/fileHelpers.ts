@@ -12,6 +12,10 @@ export function commaList(value: string) {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
+export function getMarkdownTitleFromFileName(fileName: string) {
+  return fileName.replace(/\.(md|markdown)$/i, "");
+}
+
 export function getClipboardImageFiles(clipboardData: DataTransfer) {
   const directFiles = Array.from(clipboardData.files).filter((file) => file.type.startsWith("image/"));
   if (directFiles.length > 0) return directFiles;
@@ -112,4 +116,3 @@ export function findMarkdownAssetFile(imageFiles: File[], markdownFile: File, im
     null
   );
 }
-

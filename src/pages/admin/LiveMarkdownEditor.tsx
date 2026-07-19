@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import { Code, Heading2, Image, List, ListOrdered, Minus, Quote, SquareCheck, Table } from "lucide-react";
 import { MarkdownRenderer } from "../../components/MarkdownRenderer";
 import { getClipboardImageFiles, getImageAltText } from "./fileHelpers";
+import { deleteEditableSelection, editableLineParts, replaceEditableSelection, splitEditableLine, type EditorSelection } from "./editorModel";
 import { classifyLine, groupBlocks, type MarkdownBlock } from "./markdownEngine";
 import type { UploadMarkdownAsset } from "./types";
 
@@ -39,6 +40,41 @@ function getSelectionOffsets(el: HTMLElement) {
   } catch {
     return { start: fallback, end: fallback };
   }
+}
+
+function getEditableLineElement(node: Node | null, root: HTMLElement) {
+  const element = node instanceof Element ? node : node?.parentElement;
+  const line = element?.closest<HTMLElement>("[data-editor-line]") ?? null;
+  return line && root.contains(line) ? line : null;
+}
+
+function getOffsetWithinElement(el: HTMLElement, node: Node, offset: number) {
+  const range = document.createRange();
+  try {
+    range.selectNodeContents(el);
+    range.setEnd(node, offset);
+    return Math.max(0, Math.min(range.toString().length, (el.textContent || "").length));
+  } catch {
+    return (el.textContent || "").length;
+  }
+}
+
+function getEditorSelection(root: HTMLElement): EditorSelection | null {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  const startElement = getEditableLineElement(range.startContainer, root);
+  const endElement = getEditableLineElement(range.endContainer, root);
+  if (!startElement || !endElement) return null;
+  const startLine = Number(startElement.dataset.editorLine);
+  const endLine = Number(endElement.dataset.editorLine);
+  if (!Number.isInteger(startLine) || !Number.isInteger(endLine)) return null;
+  return {
+    startLine,
+    startOffset: getOffsetWithinElement(startElement, range.startContainer, range.startOffset),
+    endLine,
+    endOffset: getOffsetWithinElement(endElement, range.endContainer, range.endOffset),
+  };
 }
 
 function isElementFullySelected(el: HTMLElement) {
@@ -83,29 +119,6 @@ function placeCaret(el: HTMLElement, offset?: number | null) {
   } catch {
     el.focus();
   }
-}
-
-function editableLineParts(line: string) {
-  const type = classifyLine(line);
-  if (type.type === "heading") {
-    const prefix = `${"#".repeat(type.level)} `;
-    return { type, prefix, text: type.text, toRaw: (value: string) => `${prefix}${value}` };
-  }
-  if (type.type === "quote") return { type, prefix: "> ", text: type.text, toRaw: (value: string) => `> ${value}` };
-  if (type.type === "ul") {
-    const indent = " ".repeat(type.indent);
-    return { type, prefix: `${indent}- `, text: type.text, toRaw: (value: string) => `${indent}- ${value}` };
-  }
-  if (type.type === "ol") {
-    const indent = " ".repeat(type.indent);
-    return { type, prefix: `${indent}${type.num}. `, text: type.text, toRaw: (value: string) => `${indent}${type.num}. ${value}` };
-  }
-  if (type.type === "checkbox") {
-    const indent = " ".repeat(type.indent);
-    const marker = `- [${type.checked ? "x" : " "}] `;
-    return { type, prefix: `${indent}${marker}`, text: type.text, toRaw: (value: string) => `${indent}${marker}${value}` };
-  }
-  return { type, prefix: "", text: line, toRaw: (value: string) => value };
 }
 
 type InlineToken =
@@ -192,6 +205,7 @@ function RawLine({
   onInputCommit,
   onBlurCommit,
   onPasteText,
+  onDeleteInput,
 }: {
   line: string;
   startLine: number;
@@ -203,6 +217,7 @@ function RawLine({
   onInputCommit: (target: HTMLDivElement, line: number, toRaw: (value: string) => string) => void;
   onBlurCommit: (event: React.FocusEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
   onPasteText: (event: React.ClipboardEvent<HTMLDivElement>, line: number, toRaw: (value: string) => string) => void;
+  onDeleteInput: (target: HTMLDivElement, line: number, direction: "backward" | "forward") => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const isComposingRef = useRef(false);
@@ -225,8 +240,10 @@ function RawLine({
     <div className={rawLineFrameClass(line)}>
       {parts.prefix && <span className="select-none whitespace-pre font-mono text-[0.72em] font-semibold text-gray-300">{parts.prefix}</span>}
       <div
+        key={line}
         ref={ref}
         contentEditable
+        data-editor-line={startLine}
         data-placeholder={placeholder}
         suppressContentEditableWarning
         spellCheck={false}
@@ -263,6 +280,13 @@ function RawLine({
           if (isComposingRef.current || event.nativeEvent.isComposing) return;
           onKeyDown(event, startLine, parts.toRaw);
           window.requestAnimationFrame(updateActiveToken);
+        }}
+        onBeforeInput={(event) => {
+          if (isComposingRef.current) return;
+          const inputType = (event.nativeEvent as InputEvent).inputType;
+          if (inputType !== "deleteContentBackward" && inputType !== "deleteContentForward") return;
+          event.preventDefault();
+          onDeleteInput(event.currentTarget, startLine, inputType === "deleteContentBackward" ? "backward" : "forward");
         }}
         onBlur={(event) => onBlurCommit(event, startLine, parts.toRaw)}
         onPaste={(event) => onPasteText(event, startLine, parts.toRaw)}
@@ -514,6 +538,28 @@ export function LiveMarkdownEditor({
     commit([...target], lastLine, target[lastLine]?.length ?? 0);
   };
 
+  const applyMutation = (mutation: { lines: string[]; focusLine: number; caret: number }) => {
+    if (mutation.lines.join("\n") === linesRef.current.join("\n")) return;
+    rememberCurrentState();
+    wholeEditorSelectedRef.current = false;
+    window.getSelection()?.removeAllRanges();
+    commit(mutation.lines, mutation.focusLine, mutation.caret);
+  };
+
+  const deleteSelection = (selection: EditorSelection, direction: "backward" | "forward") => {
+    if (selection.startLine === selection.endLine) {
+      applyMutation(deleteEditableSelection(
+        linesRef.current,
+        selection.startLine,
+        selection.startOffset,
+        selection.endOffset,
+        direction,
+      ));
+      return;
+    }
+    applyMutation(replaceEditableSelection(linesRef.current, selection));
+  };
+
   const handleEditorKeyDownCapture = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const key = event.key.toLowerCase();
     if ((event.metaKey || event.ctrlKey) && key === "z") {
@@ -527,6 +573,15 @@ export function LiveMarkdownEditor({
       event.stopPropagation();
       restoreHistory("redo");
       return;
+    }
+    if (!wholeEditorSelectedRef.current && (event.key === "Backspace" || event.key === "Delete") && articleRef.current) {
+      const selection = getEditorSelection(articleRef.current);
+      if (selection) {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteSelection(selection, event.key === "Backspace" ? "backward" : "forward");
+        return;
+      }
     }
     if (!wholeEditorSelectedRef.current) return;
 
@@ -597,35 +652,15 @@ export function LiveMarkdownEditor({
       selectWholeEditor();
     } else if (event.key === "Enter") {
       event.preventDefault();
-      rememberCurrentState();
-      const offset = getCaretOffset(event.currentTarget);
-      const text = event.currentTarget.textContent || "";
-      commit(
-        (current) => {
-          const next = [...current];
-          next[startLine] = toRaw(text.slice(0, offset));
-          next.splice(startLine + 1, 0, text.slice(offset));
-          return next;
-        },
-        startLine + 1,
-        0,
+      const selection = getSelectionOffsets(event.currentTarget);
+      applyMutation(splitEditableLine(linesRef.current, startLine, selection.start, selection.end));
+    } else if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      const selection = getSelectionOffsets(event.currentTarget);
+      deleteSelection(
+        { startLine, startOffset: selection.start, endLine: startLine, endOffset: selection.end },
+        event.key === "Backspace" ? "backward" : "forward",
       );
-    } else if (event.key === "Backspace") {
-      const offset = getCaretOffset(event.currentTarget);
-      if (offset === 0 && startLine > 0) {
-        event.preventDefault();
-        rememberCurrentState();
-        const text = event.currentTarget.textContent || "";
-        setLines((current) => {
-          const next = [...current];
-          caretHintRef.current = next[startLine - 1].length;
-          next[startLine - 1] += toRaw(text);
-          next.splice(startLine, 1);
-          return next;
-        });
-        setFocusLine(startLine - 1);
-        setFocusNonce((nonce) => nonce + 1);
-      }
     } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       event.preventDefault();
       const text = event.currentTarget.textContent || "";
@@ -642,6 +677,11 @@ export function LiveMarkdownEditor({
     } else if (event.key === "Escape") {
       event.currentTarget.blur();
     }
+  };
+
+  const handleDeleteInput = (target: HTMLDivElement, startLine: number, direction: "backward" | "forward") => {
+    const selection = getSelectionOffsets(target);
+    deleteSelection({ startLine, startOffset: selection.start, endLine: startLine, endOffset: selection.end }, direction);
   };
 
   const handleBlurCommit = (event: React.FocusEvent<HTMLDivElement>, startLine: number, toRaw: (value: string) => string) => {
@@ -848,6 +888,7 @@ export function LiveMarkdownEditor({
               onKeyDown={handleKeyDown}
               onBlurCommit={handleBlurCommit}
               onPasteText={handlePasteText}
+              onDeleteInput={handleDeleteInput}
             />
           );
         })}
