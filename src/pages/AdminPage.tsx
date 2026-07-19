@@ -32,6 +32,10 @@ export function AdminPage() {
   const assetFileImportInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingMarkdownImport, setPendingMarkdownImport] = useState<PendingMarkdownImport | null>(null);
 
+  useEffect(() => {
+    if (activeTab === "blog" || activeTab === "docs") setNavCollapsed(true);
+  }, [activeTab]);
+
   const fetchData = useCallback(async () => {
     const [projRes, postsRes, docsRes, expRes] = await Promise.all([
       fetch("/api/projects"),

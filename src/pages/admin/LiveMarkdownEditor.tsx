@@ -223,6 +223,15 @@ function RawLine({
   const isComposingRef = useRef(false);
   const [activeTokenId, setActiveTokenId] = useState<string | null>(null);
   const parts = editableLineParts(line);
+  const lineType = classifyLine(line);
+  const prefixIsStructural = lineType.type === "heading" || lineType.type === "quote";
+  const visiblePrefix = lineType.type === "ul"
+    ? `${" ".repeat(lineType.indent)}•`
+    : lineType.type === "ol"
+      ? `${" ".repeat(lineType.indent)}${lineType.num}.`
+      : lineType.type === "checkbox"
+        ? `${" ".repeat(lineType.indent)}${lineType.checked ? "☑" : "☐"}`
+        : parts.prefix;
   const inlineTokens = useMemo(() => parseInlineTokens(parts.text), [parts.text]);
   const updateActiveToken = () => {
     if (!ref.current) return;
@@ -238,7 +247,15 @@ function RawLine({
 
   return (
     <div className={rawLineFrameClass(line)}>
-      {parts.prefix && <span className="select-none whitespace-pre font-mono text-[0.72em] font-semibold text-gray-300">{parts.prefix}</span>}
+      {parts.prefix && (
+        <span
+          className={prefixIsStructural
+            ? "pointer-events-none absolute right-full top-[0.3em] mr-2 select-none whitespace-pre font-mono text-[0.68em] font-semibold text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+            : "le-list-prefix min-w-[1.1em] select-none whitespace-pre text-center text-[0.9em] font-semibold"}
+        >
+          {visiblePrefix}
+        </span>
+      )}
       <div
         key={line}
         ref={ref}
@@ -371,15 +388,17 @@ const headingClasses: Record<number, { size: string; spacing: string; color: str
 
 function rawLineFrameClass(line: string) {
   const type = classifyLine(line);
-  const base = "group flex items-baseline gap-2 rounded-md border border-transparent transition-colors";
+  const base = "group relative flex items-baseline gap-2 rounded-md border border-transparent transition-colors";
+  if (type.type === "empty") return `${base} my-0 min-h-3 focus-within:min-h-8`;
   if (type.type === "heading") return `${base} ${headingClasses[type.level]?.spacing ?? "my-3"}`;
   if (type.type === "quote") return `${base} my-6 border-l-4 border-l-indigo-300 bg-indigo-50/60 py-3 pl-5 pr-4`;
-  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return `${base} my-2`;
+  if (type.type === "ul" || type.type === "ol" || type.type === "checkbox") return `${base} my-3`;
   return `${base} my-5`;
 }
 
 function rawLineClass(line: string) {
   const type = classifyLine(line);
+  if (type.type === "empty") return "le-editable-line min-w-0 min-h-3 flex-1 whitespace-pre-wrap break-words text-lg leading-3 text-gray-700 outline-none focus:min-h-8 focus:leading-8";
   if (type.type === "heading") {
     const heading = headingClasses[type.level] ?? headingClasses[6];
     return `le-editable-line min-w-0 min-h-[1.2em] flex-1 whitespace-pre-wrap break-words font-display font-black tracking-tight outline-none ${heading.color} ${heading.size}`;
@@ -399,7 +418,7 @@ function PreviewShell({ markdown, line, onFocus }: { markdown: string; line: num
         onFocus(line);
       }}
     >
-      <MarkdownRenderer content={markdown || "\u00a0"} className="admin-live-render" />
+      <MarkdownRenderer content={markdown || "\u00a0"} className="admin-live-render reading-markdown" />
     </div>
   );
 }
@@ -834,7 +853,7 @@ export function LiveMarkdownEditor({
 
   return (
     <div
-      className="le-root rounded-none bg-white"
+      className={`le-root reader-live-editor reader-live-editor-${accent} rounded-none bg-white`}
       onCopyCapture={handleCopy}
       onCutCapture={handleCut}
       onKeyDownCapture={handleEditorKeyDownCapture}

@@ -354,8 +354,8 @@ export function BlogEditorScreen({
           requestAssetFiles={requestAssetFiles}
         />
         <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[760px] px-10 py-[26px] pb-[100px]">
-          <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="无标题文章" className="mb-4 block w-full bg-transparent font-display text-[34px] font-extrabold text-gray-900 outline-none placeholder:text-gray-300" />
+          <div className="mx-auto w-full max-w-[880px] px-6 py-12 pb-[100px] md:px-11 md:py-14">
+          <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="无标题文章" className="mb-4 block w-full bg-transparent font-display text-[34px] font-black leading-[1.2] text-gray-900 outline-none placeholder:text-gray-300" />
           <div className="mb-5 rounded-xl border border-gray-100 bg-gray-50">
             <button type="button" onClick={() => setPropsOpen(!propsOpen)} className="flex w-full items-center gap-1.5 px-3 py-2.5 font-mono text-[10.5px] font-bold uppercase tracking-wider text-gray-400">
               {propsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />} 属性
@@ -374,7 +374,9 @@ export function BlogEditorScreen({
               </div>
             )}
           </div>
-          <LiveMarkdownEditor value={form.content} onChange={(content) => setForm((current) => ({ ...current, content }))} docKey={`blog-${active?.id ?? "new"}`} uploadMarkdownAsset={uploadMarkdownAsset} accent="blog" />
+          <div className="border-t border-gray-100 pt-6">
+            <LiveMarkdownEditor value={form.content} onChange={(content) => setForm((current) => ({ ...current, content }))} docKey={`blog-${active?.id ?? "new"}`} uploadMarkdownAsset={uploadMarkdownAsset} accent="blog" />
+          </div>
           </div>
         </div>
       </main>
@@ -483,11 +485,13 @@ export function DocsEditorScreen({
           requestAssetFiles={requestAssetFiles}
         />
         <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[760px] px-10 py-[26px] pb-[100px]">
+          <div className="mx-auto w-full max-w-[880px] px-6 py-12 pb-[100px] md:px-11 md:py-14">
           {active ? (
             <>
-              <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="无标题文档" className="mb-4 block w-full bg-transparent font-display text-[32px] font-extrabold text-gray-900 outline-none placeholder:text-gray-300" />
-              <LiveMarkdownEditor value={form.content} onChange={(content) => setForm((current) => ({ ...current, content }))} docKey={`doc-${active.id}`} uploadMarkdownAsset={uploadMarkdownAsset} accent="docs" />
+              <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="无标题文档" className="mb-4 block w-full bg-transparent font-display text-[32px] font-black leading-[1.2] text-gray-900 outline-none placeholder:text-gray-300" />
+              <div className="border-t border-gray-100 pt-6">
+                <LiveMarkdownEditor value={form.content} onChange={(content) => setForm((current) => ({ ...current, content }))} docKey={`doc-${active.id}`} uploadMarkdownAsset={uploadMarkdownAsset} accent="docs" />
+              </div>
             </>
           ) : <div className="py-20 text-center text-sm text-gray-400">从左侧选择或新建一篇文档</div>}
           </div>

@@ -136,6 +136,20 @@ body {
     line-height: 2;
   }
 
+  .reader-live-editor {
+    color: #334155;
+    font-size: 1.13rem;
+    line-height: 1.9;
+  }
+
+  .reader-live-editor-blog .le-list-prefix {
+    color: #a5b4fc;
+  }
+
+  .reader-live-editor-docs .le-list-prefix {
+    color: #5eead4;
+  }
+
   @media (max-width: 768px) {
     .markdown-body.reading-markdown {
       font-size: 1.05rem;
