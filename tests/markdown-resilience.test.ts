@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildMarkdownHeadingTree, extractMarkdownHeadings, parseMarkdownContent } from "../src/lib/markdown";
-import { groupBlocks } from "../src/pages/admin/markdownEngine";
+import { groupBlocks, shouldRenderLinePreview } from "../src/pages/admin/markdownEngine";
 
 const transientDocuments = [
   "",
@@ -76,4 +76,13 @@ test("an unfinished code fence safely consumes the remaining editor lines", () =
     { type: "line", startLine: 0, endLine: 0 },
     { type: "code", startLine: 1, endLine: 2 },
   ]);
+});
+
+test("standalone visual markdown lines render as previews while idle", () => {
+  assert.equal(shouldRenderLinePreview("![架构图](/uploads/architecture.png)"), true);
+  assert.equal(shouldRenderLinePreview("---"), true);
+  assert.equal(shouldRenderLinePreview("***"), true);
+  assert.equal(shouldRenderLinePreview("___"), true);
+  assert.equal(shouldRenderLinePreview("正文"), false);
+  assert.equal(shouldRenderLinePreview("## 标题"), false);
 });

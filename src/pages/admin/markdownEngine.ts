@@ -44,6 +44,11 @@ export function classifyLine(line: string): ClassifiedLine {
   return { type: "paragraph", text: line };
 }
 
+export function shouldRenderLinePreview(line: string) {
+  const type = classifyLine(line).type;
+  return type === "image" || type === "hr";
+}
+
 export function groupBlocks(lines: string[]): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
   let index = 0;
@@ -83,4 +88,3 @@ export function parseTable(lines: string[]) {
 export function codeFenceLang(firstLine: string) {
   return firstLine.match(/^\s*```\s*([\w+-]*)/)?.[1] ?? "";
 }
-

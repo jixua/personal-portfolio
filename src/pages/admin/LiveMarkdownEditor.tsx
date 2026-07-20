@@ -4,7 +4,7 @@ import { Code, Heading2, Image, List, ListOrdered, Minus, Quote, SquareCheck, Ta
 import { MarkdownRenderer } from "../../components/MarkdownRenderer";
 import { getClipboardImageFiles, getImageAltText } from "./fileHelpers";
 import { deleteEditableSelection, editableLineParts, replaceEditableSelection, splitEditableLine, type EditorSelection } from "./editorModel";
-import { classifyLine, groupBlocks, type MarkdownBlock } from "./markdownEngine";
+import { classifyLine, groupBlocks, shouldRenderLinePreview, type MarkdownBlock } from "./markdownEngine";
 import type { UploadMarkdownAsset } from "./types";
 
 function getCaretOffset(el: HTMLElement) {
@@ -894,6 +894,16 @@ export function LiveMarkdownEditor({
             );
           }
           const line = lines[block.startLine] || "";
+          if (!focused && shouldRenderLinePreview(line)) {
+            return (
+              <PreviewShell
+                key={`preview-${block.startLine}`}
+                markdown={line}
+                line={block.startLine}
+                onFocus={(line) => commit(lines, line, null)}
+              />
+            );
+          }
           return (
             <RawLine
               key={`raw-${block.startLine}`}
